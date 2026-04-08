@@ -1,0 +1,7 @@
+# Arduino build artifacts (regenerable from source)
+build/
+
+# Vendored upstream library, re-clone with:
+#   git clone https://github.com/sqfmi/Watchy.git
+#   cd Watchy && git checkout v1.4.15
+Watchy/
