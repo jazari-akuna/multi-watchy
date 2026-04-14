@@ -50,6 +50,54 @@ Format:
 
 ---
 
+## 2026-04-15 — M3 source complete; APK build deferred on this host
+
+Driver source + setup + Docker builder all landed. Spent ~40 min trying to
+build an APK end-to-end (both inside Docker and via a locally-installed Android
+SDK) but hit a persistent `sdkmanager "Fetch remote repository"` hang — the
+tool spins on loading its package index even though `curl` to the same CDN
+URLs returns 200 in <1 s. Known to be slow/flaky in some networks; no config
+tweak I tried (IPv4-force, custom licenses hash, `--network=host`) broke it
+loose under my time budget.
+
+What's verified:
+- setup.sh runs cleanly + idempotently against the upstream clone.
+- Our 4 Java files exist in the right packages with AGPLv3 headers and the
+  right base classes (`AbstractBLEDeviceCoordinator`, `AbstractBTLESingleDeviceSupport`).
+- Code audit shows proper imports + structure. Debounced calendar push, all-day
+  demotion, atomic batch flush via BATCH_END all present.
+
+Not verified on this host: actual APK byte output. Path forward is one of:
+1. Run `bash docker/gb-builder/build.sh` on a host with better network (the
+   Dockerfile already has `--network=host` so it inherits whatever works there).
+2. Install `openjdk-21-jdk` + finish `sdkmanager "platforms;android-34"
+   "build-tools;34.0.0"` locally, then `cd companion/gadgetbridge && ./gradlew
+   assembleMainlineDebug`.
+
+Not blocking M1. The watch firmware is validated end-to-end via the Python BLE
+harness; it does not care whether GB or a PWA or a raw script pushed the
+packets. M4 (phone-in-loop) requires an Android device + a successful APK
+build; neither is achievable in this session's environment.
+
+## 2026-04-15 — Starting M3 (Gadgetbridge driver)
+
+Gadgetbridge cloned (shallow) at `companion/gadgetbridge/` (gitignored). Verified
+actual upstream APIs:
+
+- Base class: `AbstractBLEDeviceCoordinator` + `AbstractBTLEDeviceSupport`.
+- Calendar hooks are per-event: `onAddCalendarEvent(CalendarEventSpec)` +
+  `onDeleteCalendarEvent(byte, long)`. Our driver buffers them with a 500 ms
+  debounce then flushes an atomic batch over our GATT.
+- DeviceType.java is a flat enum — just add `WATCHY(WatchyCoordinator.class),`
+  before `TEST` entry. No DeviceHelper edit needed; it iterates values().
+- BangleJS is the closest reference for calendar handling (see `BangleJSDeviceSupport.java`).
+- PineTimeJF is the closest reference for minimal BLE coordinator.
+
+Dispatched 3 agents in parallel:
+- G1: WatchyCoordinator + WatchyConstants + setup.sh + README.
+- G2: WatchySupport + WatchyProtocol (the calendar-push heart).
+- G3: Docker APK builder so user doesn't need Android SDK locally.
+
 ## 2026-04-15 — M1 reached: 5/5 harness cases pass on real hardware
 
 Orchestrated 5 agents in parallel (BleEventProvider.cpp, WatchFace double-press
