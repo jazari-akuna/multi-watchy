@@ -16,9 +16,13 @@
 #include "../hal/IPower.h"
 #include "../hal/INetwork.h"
 #include "../hal/IEventProvider.h"
+#include "../hal/IThermometer.h"
 #include "TimeZone.h"
 
 namespace wmt {
+
+class DriftTracker;
+class DriftStatsScreen;
 
 // Shared render context passed to the individual card renderers so they
 // don't each have to rummage around in WatchFaceDeps.
@@ -43,6 +47,8 @@ struct WatchFaceDeps {
     IPower         *power;
     INetwork       *network;
     IEventProvider *events;
+    DriftTracker   *drift  = nullptr;
+    IThermometer   *thermo = nullptr;
     const TimeZone *zones;     // caller-owned array
     int             numZones;
 };
@@ -63,6 +69,11 @@ public:
     // Render the full face (4 cards) into the display and commit.
     void render(bool partialRefresh);
 
+    // Open the drift-stats overlay, poll buttons, return after BACK /
+    // library-menu passthrough / 10 s idle. Caller must then repaint
+    // the watchface (or let the library handle it if we exited to menu).
+    void openDriftStats();
+
 private:
     void renderMainCard();
     void renderAltCard(Rect slot, int tzIndex);
@@ -70,6 +81,8 @@ private:
 
     // Connect WiFi, run NTP, disconnect. Overlays sync status on the
     // display for ~1.5 s, then re-renders the face via partial refresh.
+    // The only path that touches WiFi — no background auto-sync; BLE-driven
+    // resync will replace this with a push model later.
     void forceSync();
 
     // Poll buttons for 10 s after a button-driven partial refresh.

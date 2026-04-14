@@ -10,11 +10,14 @@
 
 #include "src/face/WatchFace.h"
 #include "src/face/DayBar.h"
+#include "src/face/DriftTracker.h"
 #include "src/platform/watchy/WatchyDisplay.h"
 #include "src/platform/watchy/WatchyClock.h"
 #include "src/platform/watchy/WatchyButtons.h"
 #include "src/platform/watchy/WatchyPower.h"
 #include "src/platform/watchy/WatchyNetwork.h"
+#include "src/platform/watchy/WatchyStorage.h"
+#include "src/platform/watchy/WatchyThermometer.h"
 #include "src/platform/watchy/StubEventProvider.h"
 
 // -----------------------------------------------------------------------------
@@ -60,9 +63,14 @@ public:
 
     void handleButtonPress() override {
         uint64_t wake = esp_sleep_get_ext1_wakeup_status();
-        // MENU still opens the library menu (AboutWatchy / Set Time / Setup
-        // WiFi / Sync NTP / ...). Delegate.
         if (wake & MENU_BTN_MASK) {
+            // From the watchface, MENU opens our DriftStats overlay; from
+            // any library state, delegate so the user can navigate out.
+            if (guiState == WATCHFACE_STATE) {
+                ensureFace();
+                face_->openDriftStats();
+                return;
+            }
             Watchy::handleButtonPress();
             return;
         }
@@ -77,10 +85,16 @@ private:
         if (face_) return;
 
         displayHal_ = new wmt::WatchyDisplayHal(Watchy::display);
-        clockHal_   = new wmt::WatchyClock(Watchy::RTC);
         buttonsHal_ = new wmt::WatchyButtons();
         powerHal_   = new wmt::WatchyPower(this);
-        networkHal_ = new wmt::WatchyNetwork(this);
+        storageHal_ = new wmt::WatchyStorage();
+        thermoHal_  = new wmt::WatchyThermometer();
+
+        drift_      = new wmt::DriftTracker();
+        drift_->init(storageHal_, thermoHal_);
+
+        clockHal_   = new wmt::WatchyClock(Watchy::RTC, drift_, thermoHal_);
+        networkHal_ = new wmt::WatchyNetwork(this, clockHal_, drift_);
         events_     = new wmt::StubEventProvider();
         events_->setDemoDefault(clockHal_->nowUtc());
 
@@ -95,6 +109,8 @@ private:
         deps.power    = powerHal_;
         deps.network  = networkHal_;
         deps.events   = events_;
+        deps.drift    = drift_;
+        deps.thermo   = thermoHal_;
         deps.zones    = wmt::ZONES;
         deps.numZones = wmt::NUM_ZONES;
 
@@ -106,6 +122,9 @@ private:
     wmt::WatchyButtons      *buttonsHal_ = nullptr;
     wmt::WatchyPower        *powerHal_   = nullptr;
     wmt::WatchyNetwork      *networkHal_ = nullptr;
+    wmt::WatchyStorage      *storageHal_ = nullptr;
+    wmt::WatchyThermometer  *thermoHal_  = nullptr;
+    wmt::DriftTracker       *drift_      = nullptr;
     wmt::StubEventProvider  *events_     = nullptr;
     wmt::WatchFace          *face_       = nullptr;
 };

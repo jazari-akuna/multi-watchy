@@ -13,6 +13,7 @@
 #include "WatchFace.h"
 #include "Slot.h"
 #include "Schedule.h"
+#include "DriftStatsScreen.h"
 #include "cards/TimeZoneCard.h"
 #include "cards/EventCard.h"
 
@@ -197,6 +198,27 @@ void WatchFace::forceSync() {
 
     // Re-render the real face (partial).
     render(/*partialRefresh=*/true);
+}
+
+void WatchFace::openDriftStats() {
+    if (d_.display == nullptr || d_.buttons == nullptr ||
+        d_.power == nullptr || d_.clock == nullptr || d_.drift == nullptr) {
+        return;
+    }
+    DriftStatsScreen screen(d_.display, d_.buttons, d_.power,
+                            d_.clock, d_.thermo, *d_.drift);
+    auto r = screen.run();
+    switch (r) {
+        case DriftStatsScreen::ExitReason::Back:
+        case DriftStatsScreen::ExitReason::IdleTimeout:
+            render(/*partialRefresh=*/false);
+            break;
+        case DriftStatsScreen::ExitReason::ToLibraryMenu:
+            // Library-menu passthrough requires plumbing the .ino owns;
+            // for the MVP just repaint the face.
+            render(/*partialRefresh=*/false);
+            break;
+    }
 }
 
 // ---------- Settle loop -----------------------------------------------------

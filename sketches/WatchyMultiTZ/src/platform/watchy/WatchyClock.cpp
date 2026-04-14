@@ -1,8 +1,11 @@
 #include "WatchyClock.h"
 
+#include "../../face/DriftTracker.h"
+
 #include <Watchy.h>      // brings in WatchyRTC + TimeLib (makeTime/breakTime)
 #include <TimeLib.h>
 #include <time.h>
+#include <math.h>        // llround
 #include <stdlib.h>      // setenv
 
 // The Watchy library owns this persistent offset (seconds east of UTC).
@@ -12,11 +15,24 @@ extern RTC_DATA_ATTR long gmtOffset;
 
 namespace wmt {
 
-int64_t WatchyClock::nowUtc() {
+int64_t WatchyClock::rawRtcUtc() {
     tmElements_t tm;
     rtc_.read(tm);
     time_t local = makeTime(tm);
     return static_cast<int64_t>(local) - static_cast<int64_t>(gmtOffset);
+}
+
+int64_t WatchyClock::nowUtc() {
+    int64_t raw = rawRtcUtc();
+    if (!drift_) return raw;
+    int64_t baseline = drift_->lastSyncUtc();
+    if (baseline == 0) return raw;     // no FC learned yet
+    int64_t elapsed = raw - baseline;
+    if (elapsed <= 0) return raw;
+    int8_t t = thermo_ ? thermo_->readCelsius() : 25;
+    double corr = drift_->correctionSeconds(elapsed, t);
+    // Round to the nearest second since our RTC has 1 s resolution anyway.
+    return raw - static_cast<int64_t>(llround(corr));
 }
 
 void WatchyClock::setUtc(int64_t epoch) {
