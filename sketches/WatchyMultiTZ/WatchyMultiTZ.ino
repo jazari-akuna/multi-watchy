@@ -1,23 +1,116 @@
-#include "WatchyMultiTZ.h"
+// WatchyMultiTZ v3 — Watchy sketch entry point.
+//
+// Thin glue: instantiates the Watchy-specific HAL adapters (which live under
+// src/platform/watchy/), builds a WatchFaceDeps bundle, and hands control to
+// the platform-agnostic WatchFace on every wake. Subclasses Watchy so the
+// library's init() still handles menus and deep-sleep scheduling.
 
-watchySettings settings{
-    .cityID                = CITY_ID,
-    .lat                   = "",
-    .lon                   = "",
-    .weatherAPIKey         = OPENWEATHERMAP_APIKEY,
-    .weatherURL            = OPENWEATHERMAP_URL,
-    .weatherUnit           = TEMP_UNIT,
-    .weatherLang           = TEMP_LANG,
-    .weatherUpdateInterval = WEATHER_UPDATE_INTERVAL,
-    .ntpServer             = NTP_SERVER,
-    .gmtOffset             = GMT_OFFSET_SEC,
-    .vibrateOClock         = true,
+#include <Watchy.h>
+#include "settings.h"
+
+#include "src/face/WatchFace.h"
+#include "src/face/DayBar.h"
+#include "src/platform/watchy/WatchyDisplay.h"
+#include "src/platform/watchy/WatchyClock.h"
+#include "src/platform/watchy/WatchyButtons.h"
+#include "src/platform/watchy/WatchyPower.h"
+#include "src/platform/watchy/WatchyNetwork.h"
+#include "src/platform/watchy/StubEventProvider.h"
+
+// -----------------------------------------------------------------------------
+// Persistent state that must survive deep-sleep. Lives in RTC slow memory;
+// lost on battery pull (defaults to 0 on cold boot, which means "SZX main").
+// -----------------------------------------------------------------------------
+RTC_DATA_ATTR int g_mainIdx = 2;   // default: ZRH as main (matches mockup)
+
+// The Watchy library uses its own watchySettings struct (cityID, weather
+// settings, NTP server, etc.). We build a light instance so the library's
+// built-in menu options (Sync NTP, Setup WiFi) keep working without us
+// having to replicate them. Values come from namespace wmt:: in settings.h.
+static watchySettings libSettings{
+    /*cityID=*/               String(wmt::CITY_ID),
+    /*lat=*/                  String(""),
+    /*lon=*/                  String(""),
+    /*weatherAPIKey=*/        String(wmt::OPENWEATHERMAP_APIKEY),
+    /*weatherURL=*/           String("http://api.openweathermap.org/data/2.5/weather?id={cityID}&lang={lang}&units={units}&appid={apiKey}"),
+    /*weatherUnit=*/          String("metric"),
+    /*weatherLang=*/          String("en"),
+    /*weatherUpdateInterval=*/(int8_t)wmt::WEATHER_UPDATE_MIN,
+    /*ntpServer=*/            String(wmt::NTP_SERVER),
+    /*gmtOffset=*/            wmt::GMT_OFFSET_SEC,
+    /*vibrateOClock=*/        true,
 };
 
-WatchyMultiTZ watchy(settings);
+// -----------------------------------------------------------------------------
+// Our Watchy subclass. Overrides drawWatchFace (minute-tick render) and
+// handleButtonPress (wake dispatch) to route through the platform-agnostic
+// WatchFace. Menu button still goes through the library's built-in flow.
+// -----------------------------------------------------------------------------
+class WatchyMultiTZ final : public Watchy {
+public:
+    WatchyMultiTZ() : Watchy(libSettings) {}
 
-void setup() {
-    watchy.init();
-}
+    void drawWatchFace() override {
+        ensureFace();
+        // Base class already populated currentTime via RTC.read() before
+        // calling us on minute-tick wakes. The face doesn't care — it reads
+        // UTC directly via the Clock HAL.
+        face_->render(/*partialRefresh=*/true);
+    }
 
-void loop() {}
+    void handleButtonPress() override {
+        uint64_t wake = esp_sleep_get_ext1_wakeup_status();
+        // MENU still opens the library menu (AboutWatchy / Set Time / Setup
+        // WiFi / Sync NTP / ...). Delegate.
+        if (wake & MENU_BTN_MASK) {
+            Watchy::handleButtonPress();
+            return;
+        }
+        ensureFace();
+        face_->onWake();
+    }
+
+private:
+    // Lazily-constructed HAL + face. Stored as pointers so we can init them
+    // on first use (by which point Watchy::display / Watchy::RTC are live).
+    void ensureFace() {
+        if (face_) return;
+
+        displayHal_ = new wmt::WatchyDisplayHal(Watchy::display);
+        clockHal_   = new wmt::WatchyClock(Watchy::RTC);
+        buttonsHal_ = new wmt::WatchyButtons();
+        powerHal_   = new wmt::WatchyPower(this);
+        networkHal_ = new wmt::WatchyNetwork(this);
+        events_     = new wmt::StubEventProvider();
+        events_->setDemoDefault(clockHal_->nowUtc());
+
+        // Configure DayBar's global minute axis from the compile-time
+        // schedule extremes.
+        wmt::DayBar::configure(wmt::BAR_START_MIN, wmt::BAR_END_MIN);
+
+        wmt::WatchFaceDeps deps{};
+        deps.display  = displayHal_;
+        deps.clock    = clockHal_;
+        deps.buttons  = buttonsHal_;
+        deps.power    = powerHal_;
+        deps.network  = networkHal_;
+        deps.events   = events_;
+        deps.zones    = wmt::ZONES;
+        deps.numZones = wmt::NUM_ZONES;
+
+        face_ = new wmt::WatchFace(deps, g_mainIdx);
+    }
+
+    wmt::WatchyDisplayHal   *displayHal_ = nullptr;
+    wmt::WatchyClock        *clockHal_   = nullptr;
+    wmt::WatchyButtons      *buttonsHal_ = nullptr;
+    wmt::WatchyPower        *powerHal_   = nullptr;
+    wmt::WatchyNetwork      *networkHal_ = nullptr;
+    wmt::StubEventProvider  *events_     = nullptr;
+    wmt::WatchFace          *face_       = nullptr;
+};
+
+static WatchyMultiTZ watchy;
+
+void setup() { watchy.init(); }
+void loop()  {}

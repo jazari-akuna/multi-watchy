@@ -5,3 +5,9 @@ build/
 #   git clone https://github.com/sqfmi/Watchy.git
 #   cd Watchy && git checkout v1.4.15
 Watchy/
+
+# Desktop sim build outputs — binary + object files + generated PNGs.
+sim/multitzsim
+sim/*.o
+sim/out/
+sketches/WatchyMultiTZ/src/**/*.o

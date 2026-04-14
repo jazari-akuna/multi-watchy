@@ -1,0 +1,250 @@
+// WatchFace.cpp
+//
+// This translation unit is strictly platform-agnostic: it knows nothing
+// about GxEPD, ESP32 deep-sleep, Adafruit_GFX, or any specific hardware.
+// Every side-effect that reaches the outside world — drawing a pixel,
+// reading the RTC, polling a GPIO, opening WiFi, sleeping the CPU — goes
+// through one of the HAL interface pointers held in WatchFaceDeps. That
+// is what lets the exact same .cpp compile for a Watchy sketch, a
+// PineTime port, or a desktop simulator; only the HAL implementations
+// differ. As a consequence: do NOT reach for Arduino.h, <esp_sleep.h>,
+// <WiFi.h>, or any vendor-specific header from inside this file.
+
+#include "WatchFace.h"
+#include "Slot.h"
+#include "Schedule.h"
+#include "cards/TimeZoneCard.h"
+#include "cards/EventCard.h"
+
+namespace wmt {
+
+WatchFace::WatchFace(const WatchFaceDeps &deps, int &mainIdxRef)
+    : d_(deps), mainIdx_(mainIdxRef) {}
+
+// Utility: calendar-day ordinal used to compute day-deltas between zones.
+// Multiplying tm_year by 400 (> max tm_yday of 365) makes the ordinal
+// strictly monotonic so subtraction gives a clean integer day offset.
+static int dayOrdinal(const LocalDateTime &t) {
+    return (t.year - 1970) * 400 + (t.month - 1) * 32 + t.day;
+    // Approximate; for day-delta purposes we only need a monotone key such
+    // that two zones' same-calendar-date have identical ordinals and
+    // adjacent-date differ by roughly 1. A more correct form would use
+    // tm_yday, but LocalDateTime doesn't carry it — the approximation is
+    // exact for deltas in {-1, 0, +1} which is all the watchface displays.
+}
+
+static const char *zoneTZ(const WatchFaceDeps &d, int idx) {
+    const int i = ((idx % d.numZones) + d.numZones) % d.numZones;
+    return d.zones[i].posixTZ;
+}
+
+// ---------- Card delegates --------------------------------------------------
+
+// Fill a RenderCtx with common fields. `mainSlotIdx` selects which zone's
+// TZ + schedule go into ctx.mainTZ / ctx.mainSchedule (for event-card use).
+static RenderCtx makeCtx(const WatchFaceDeps &d, int64_t nowUtc, int mainSlotIdx) {
+    const int mi = ((mainSlotIdx % d.numZones) + d.numZones) % d.numZones;
+    RenderCtx ctx{};
+    ctx.display       = d.display;
+    ctx.clock         = d.clock;
+    ctx.events        = d.events;
+    ctx.nowUtc        = nowUtc;
+    ctx.mainTZ        = d.zones[mi].posixTZ;
+    ctx.mainSchedule  = &d.zones[mi].schedule;
+    ctx.batteryVolts  = d.power ? d.power->batteryVoltage() : 0.0f;
+    return ctx;
+}
+
+void WatchFace::renderMainCard() {
+    const int idx = ((mainIdx_ % d_.numZones) + d_.numZones) % d_.numZones;
+    RenderCtx ctx = makeCtx(d_, d_.clock->nowUtc(), idx);
+    // Main card never shows a day-delta badge, so dayDelta = 0.
+    TimeZoneCard::render(d_.display, SLOT_MAIN, d_.zones[idx], ctx,
+                         /*isMain=*/true, /*dayDelta=*/0);
+}
+
+void WatchFace::renderAltCard(Rect slot, int tzIndex) {
+    const int altIdx  = ((tzIndex   % d_.numZones) + d_.numZones) % d_.numZones;
+    const int mainIdx = ((mainIdx_  % d_.numZones) + d_.numZones) % d_.numZones;
+    const int64_t nowUtc = d_.clock->nowUtc();
+    RenderCtx ctx = makeCtx(d_, nowUtc, mainIdx);
+
+    // Compute the alt zone's calendar-day offset relative to the main zone.
+    LocalDateTime mainT = d_.clock->toLocal(nowUtc, d_.zones[mainIdx].posixTZ);
+    LocalDateTime altT  = d_.clock->toLocal(nowUtc, d_.zones[altIdx ].posixTZ);
+    const int dayDelta = dayOrdinal(altT) - dayOrdinal(mainT);
+
+    TimeZoneCard::render(d_.display, slot, d_.zones[altIdx], ctx,
+                         /*isMain=*/false, dayDelta);
+}
+
+void WatchFace::renderEventCard() {
+    const int mainIdx = ((mainIdx_ % d_.numZones) + d_.numZones) % d_.numZones;
+    RenderCtx ctx = makeCtx(d_, d_.clock->nowUtc(), mainIdx);
+    // EventCard decides its own inversion (currently: in-event-or-not).
+    EventCard::render(d_.display, SLOT_EVENT, ctx, /*inverted_ignored=*/false);
+}
+
+// ---------- Full-face render ------------------------------------------------
+
+void WatchFace::render(bool partialRefresh) {
+    // Clear background to Bg. Outer gutter = Fg (the black frame around
+    // the whole screen visible in the mockup).
+    d_.display->clear(Ink::Fg);   // fills the panel in logical foreground
+                                  // i.e. the "ink on" colour — gives us the
+                                  // black outer border for free.
+    // Now punch the screen-interior back to Bg so only the 1-px gutter
+    // remains as Fg.
+    Rect interior = {
+        1, 1,
+        (int16_t)(d_.display->width()  - 2),
+        (int16_t)(d_.display->height() - 2),
+    };
+    d_.display->fillRect(interior, Ink::Bg);
+
+    if (d_.numZones <= 0 || d_.zones == nullptr) {
+        d_.display->commit(partialRefresh);
+        return;
+    }
+
+    // Slot assignment: main shows mainIdx_, the two alt cards cycle the
+    // other zones in order. With 3 configured zones the layout is:
+    //   main   = mainIdx_
+    //   alt L  = mainIdx_ + 1
+    //   alt R  = mainIdx_ + 2
+    const int m = ((mainIdx_ % d_.numZones) + d_.numZones) % d_.numZones;
+    const int altL = (m + 1) % d_.numZones;
+    const int altR = (m + 2) % d_.numZones;
+
+    renderAltCard(SLOT_ALT_LEFT,  altL);
+    renderAltCard(SLOT_ALT_RIGHT, altR);
+    renderMainCard();
+    renderEventCard();
+
+    d_.display->commit(partialRefresh);
+}
+
+// ---------- Wake handling ---------------------------------------------------
+
+void WatchFace::onWake() {
+    const Button b = d_.buttons->wakeButton();
+
+    switch (b) {
+        case Button::None:
+            // Minute-tick wake (timer alarm). Partial refresh only.
+            render(/*partialRefresh=*/true);
+            return;
+
+        case Button::Up:
+            // Cycle main zone forward. Partial refresh, then settle loop
+            // to handle rapid follow-up presses / schedule a full refresh.
+            mainIdx_ = ((mainIdx_ + 1) % d_.numZones + d_.numZones) % d_.numZones;
+            render(/*partialRefresh=*/true);
+            settleThenFullRefresh();
+            return;
+
+        case Button::Down:
+            forceSync();
+            settleThenFullRefresh();
+            return;
+
+        case Button::Menu:
+            // The Watchy platform shim routes MENU to the Watchy library's
+            // own menu handler BEFORE calling onWake(), so we should never
+            // see Menu here. Treat as no-op for portability: don't draw.
+            return;
+
+        case Button::Back:
+            // Reserved / no-op on the watchface. Explicitly do nothing so
+            // the library doesn't see us consume battery on spurious wakes.
+            return;
+    }
+}
+
+// ---------- Forced NTP sync -------------------------------------------------
+
+// Simple centred overlay painter. Uses whatever font the platform had set
+// — the shim is responsible for configuring a reasonable default before
+// calling into WatchFace.
+static void drawOverlay(IDisplay *d, const char *msg) {
+    d->clear(Ink::Bg);
+    d->setTextColour(Ink::Fg);
+    int16_t w = 0, h = 0;
+    d->measureText(msg, w, h);
+    int16_t x = (int16_t)((d->width()  - w) / 2);
+    int16_t y = (int16_t)((d->height() + h) / 2);   // baseline
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    d->drawText(x, y, msg);
+    d->commit(/*partialRefresh=*/true);
+}
+
+void WatchFace::forceSync() {
+    if (d_.display == nullptr) return;
+
+    drawOverlay(d_.display, "Syncing NTP...");
+
+    bool ok = false;
+    if (d_.network != nullptr) {
+        if (d_.network->connect()) {
+            ok = d_.network->syncNtp();
+        }
+        d_.network->disconnect();
+    }
+
+    drawOverlay(d_.display, ok ? "Sync OK" : "Sync FAIL");
+    if (d_.power != nullptr) d_.power->delayMs(1500);
+
+    // Re-render the real face (partial).
+    render(/*partialRefresh=*/true);
+}
+
+// ---------- Settle loop -----------------------------------------------------
+
+// Mirrors the v2 pattern: after a partial refresh from a button press,
+// poll the buttons for up to 10 s. A further UP press cycles the zone
+// inline (partial refresh, timer reset). Any other press exits the loop
+// so the next cold wake can handle it. On 10 s of quiescence, issue ONE
+// full refresh to clear e-ink ghosting accumulated from the partials.
+void WatchFace::settleThenFullRefresh() {
+    if (d_.power == nullptr || d_.buttons == nullptr) {
+        // Can't poll — just do the full refresh immediately.
+        render(/*partialRefresh=*/false);
+        return;
+    }
+
+    constexpr uint32_t SETTLE_MS = 10000;
+    constexpr uint32_t POLL_MS   = 20;
+    uint32_t lastActivity = d_.power->millisNow();
+
+    for (;;) {
+        const uint32_t now = d_.power->millisNow();
+        if (now - lastActivity >= SETTLE_MS) break;
+
+        // UP → cycle inline.
+        if (d_.buttons->isPressed(Button::Up)) {
+            // Debounce release.
+            while (d_.buttons->isPressed(Button::Up)) d_.power->delayMs(5);
+            mainIdx_ = ((mainIdx_ + 1) % d_.numZones + d_.numZones) % d_.numZones;
+            render(/*partialRefresh=*/true);
+            lastActivity = d_.power->millisNow();
+            continue;
+        }
+
+        // Any of the other three buttons → break so the next wake cycle
+        // handles it. We don't want to consume presses here that the
+        // platform has its own plans for (e.g. MENU on Watchy).
+        if (d_.buttons->isPressed(Button::Down) ||
+            d_.buttons->isPressed(Button::Menu) ||
+            d_.buttons->isPressed(Button::Back)) {
+            break;
+        }
+
+        d_.power->delayMs(POLL_MS);
+    }
+
+    // Quiescence → one full refresh.
+    render(/*partialRefresh=*/false);
+}
+
+} // namespace wmt

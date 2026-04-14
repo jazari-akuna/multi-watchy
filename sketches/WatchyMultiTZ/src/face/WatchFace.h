@@ -1,0 +1,84 @@
+#pragma once
+// Platform-agnostic orchestrator for the multi-timezone watchface.
+//
+// Owns no hardware. All device-specific behaviour is delegated through the
+// HAL interface pointers in WatchFaceDeps. A platform shim (e.g.
+// sketches/WatchyMultiTZ/src/platform/watchy/*) creates the concrete HAL
+// impls and the `WatchFace` instance, forwards wake events via onWake(),
+// and everything in this translation unit is reusable on any other 1-bit
+// display hardware that implements the same HAL.
+//
+// Card renderers (TimeZoneCard, EventCard) live in `face/cards/`.
+
+#include "../hal/IDisplay.h"
+#include "../hal/IClock.h"
+#include "../hal/IButtons.h"
+#include "../hal/IPower.h"
+#include "../hal/INetwork.h"
+#include "../hal/IEventProvider.h"
+#include "TimeZone.h"
+
+namespace wmt {
+
+// Shared render context passed to the individual card renderers so they
+// don't each have to rummage around in WatchFaceDeps.
+struct RenderCtx {
+    IDisplay       *display;
+    IClock         *clock;
+    IEventProvider *events;
+    int64_t         nowUtc;
+    const char     *mainTZ;          // POSIX TZ of the currently-main zone
+                                     // (used to format event times in the
+                                     // user's primary wall-clock)
+    const Schedule *mainSchedule;    // work/lunch ranges of the main zone
+                                     // (used by EventBar to shade the 8-hour
+                                     // window by work/off status)
+    float           batteryVolts;    // current battery voltage (0 if unknown)
+};
+
+struct WatchFaceDeps {
+    IDisplay       *display;
+    IClock         *clock;
+    IButtons       *buttons;
+    IPower         *power;
+    INetwork       *network;
+    IEventProvider *events;
+    const TimeZone *zones;     // caller-owned array
+    int             numZones;
+};
+
+class WatchFace {
+public:
+    // `mainIdxRef` is a reference to an RTC_DATA_ATTR int owned by the
+    // platform shim — this class mutates it when UP cycles zones. Keeping
+    // the storage outside the class lets the platform decide how the
+    // counter survives deep sleep (RTC memory, flash, nothing).
+    WatchFace(const WatchFaceDeps &deps, int &mainIdxRef);
+
+    // Called by the platform glue after each wake. Inspects the HAL to
+    // decide whether this was a minute-tick, a button press, or a forced
+    // sync request and acts accordingly.
+    void onWake();
+
+    // Render the full face (4 cards) into the display and commit.
+    void render(bool partialRefresh);
+
+private:
+    void renderMainCard();
+    void renderAltCard(Rect slot, int tzIndex);
+    void renderEventCard();
+
+    // Connect WiFi, run NTP, disconnect. Overlays sync status on the
+    // display for ~1.5 s, then re-renders the face via partial refresh.
+    void forceSync();
+
+    // Poll buttons for 10 s after a button-driven partial refresh.
+    // Handles rapid UP cycling inline; breaks early on other presses.
+    // On 10 s of quiescence, commits one full refresh to clear ghosting.
+    void settleThenFullRefresh();
+
+    WatchFaceDeps d_;
+    int          &mainIdx_;   // index into d_.zones
+};
+
+} // namespace wmt
