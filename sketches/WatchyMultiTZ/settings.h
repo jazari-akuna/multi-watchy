@@ -37,9 +37,11 @@ static constexpr int NUM_ZONES = (int)(sizeof(ZONES) / sizeof(ZONES[0]));
 // convention; the static_assert below catches drift.
 constexpr int16_t EARLIEST_START_MIN =  8 * 60;   // ZRH work start (08:00)
 constexpr int16_t LATEST_END_MIN     = 20 * 60;   // SZX work end   (20:00)
-constexpr int16_t HALF_WIDTH_MIN     = halfWidth(EARLIEST_START_MIN, LATEST_END_MIN);
-constexpr int16_t BAR_START_MIN      = (int16_t)(12*60 - HALF_WIDTH_MIN);
-constexpr int16_t BAR_END_MIN        = (int16_t)(12*60 + HALF_WIDTH_MIN);
+// Small axis padding outside the workday so the now-pin doesn't collide
+// with the bar's outer border at the extremes.
+constexpr int16_t BAR_PADDING_MIN    = 30;
+constexpr int16_t BAR_START_MIN      = (int16_t)(EARLIEST_START_MIN - BAR_PADDING_MIN);
+constexpr int16_t BAR_END_MIN        = (int16_t)(LATEST_END_MIN     + BAR_PADDING_MIN);
 
 // OpenWeatherMap is kept for library compatibility (the Watchy library's
 // weather-fetch path calls syncNTP as a side effect, which we still want).

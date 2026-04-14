@@ -159,6 +159,12 @@ void DayBar::render(IDisplay *d, Rect bar,
 
     d->drawVLine((int16_t)(pinX),     bar.y, bar.h, pinInk);
     d->drawVLine((int16_t)(pinX + 1), bar.y, bar.h, pinInk);
+
+    // Extension below the bar, in the CARD's foreground ink so it contrasts
+    // with the card interior (black on white, or white on inverted cards).
+    constexpr int16_t POKE_H = 3;
+    d->drawVLine((int16_t)(pinX),     (int16_t)(bar.y + bar.h), POKE_H, borderFg);
+    d->drawVLine((int16_t)(pinX + 1), (int16_t)(bar.y + bar.h), POKE_H, borderFg);
 }
 
 } // namespace wmt

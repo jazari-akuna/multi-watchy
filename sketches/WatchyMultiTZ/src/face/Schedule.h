@@ -35,14 +35,6 @@ constexpr int16_t latestEnd(const Schedule *s, int n) {
     return m;
 }
 
-// Half-width (in minutes) required so noon is centred AND both extremes are
-// visible. The resulting bar spans [12*60 - halfWidth, 12*60 + halfWidth].
-constexpr int16_t halfWidth(int16_t earliest, int16_t latest) {
-    int16_t a = (int16_t)(12 * 60 - earliest);
-    int16_t b = (int16_t)(latest - 12 * 60);
-    return a > b ? a : b;
-}
-
 // True if `minute` (0..1439) is in the "night" phase of `s` (outside work).
 constexpr bool isNight(int16_t minute, const Schedule &s) {
     return minute < s.workStartMin || minute >= s.workEndMin;
