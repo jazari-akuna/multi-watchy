@@ -52,15 +52,21 @@ struct LocalDateTime {
     int8_t  wday;   // 0=Sun..6=Sat
 };
 
-// Maximum title length for a calendar/event entry — sized to fit comfortably
-// on the 200-px event card with some padding.
-static constexpr int EVENT_TITLE_MAX = 48;
+// Maximum title length for a calendar/event entry — sized so the whole
+// Event struct is 64 bytes (matches the BLE write-packet capacity).
+static constexpr int EVENT_TITLE_MAX = 46;
+
+// Event flag bits. `flags` is a bitfield; add new bits as needed.
+static constexpr uint8_t EVENT_FLAG_ALL_DAY = 0x01;
 
 struct Event {
-    char    title[EVENT_TITLE_MAX];
-    int64_t startUtc;  // Unix epoch seconds
-    int64_t endUtc;
+    char    title[EVENT_TITLE_MAX];  // 46 bytes, null-terminated
+    uint8_t flags;                   // EVENT_FLAG_* bitmask
+    uint8_t _pad;                    // reserved / alignment
+    int64_t startUtc;                // Unix epoch seconds (UTC)
+    int64_t endUtc;                  // Unix epoch seconds (UTC)
 };
+static_assert(sizeof(Event) == 64, "Event must be exactly 64 bytes");
 
 } // namespace wmt
 

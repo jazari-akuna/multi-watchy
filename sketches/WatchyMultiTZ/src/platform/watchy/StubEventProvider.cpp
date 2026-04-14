@@ -19,6 +19,8 @@ static void copyTitle(char *dst, const char *src) {
 
 StubEventProvider::StubEventProvider() {
     copyTitle(demoEvent_.title, DEFAULT_TITLE);
+    demoEvent_.flags    = 0;
+    demoEvent_._pad     = 0;
     demoEvent_.startUtc = 0;
     demoEvent_.endUtc   = 0;
 }

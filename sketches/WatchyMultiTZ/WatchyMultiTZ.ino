@@ -18,7 +18,7 @@
 #include "src/platform/watchy/WatchyNetwork.h"
 #include "src/platform/watchy/WatchyStorage.h"
 #include "src/platform/watchy/WatchyThermometer.h"
-#include "src/platform/watchy/StubEventProvider.h"
+#include "src/platform/watchy/BleEventProvider.h"
 
 // -----------------------------------------------------------------------------
 // Persistent state that must survive deep-sleep. Lives in RTC slow memory;
@@ -55,6 +55,12 @@ public:
 
     void drawWatchFace() override {
         ensureFace();
+        // Cold boot (battery pull or flash) → advertise BLE for 60 s so a
+        // companion app (or an automated test harness) can pair / push a
+        // batch without a human button press.
+        if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+            events_->syncNow(60000);
+        }
         // Base class already populated currentTime via RTC.read() before
         // calling us on minute-tick wakes. The face doesn't care — it reads
         // UTC directly via the Clock HAL.
@@ -95,8 +101,7 @@ private:
 
         clockHal_   = new wmt::WatchyClock(Watchy::RTC, drift_, thermoHal_);
         networkHal_ = new wmt::WatchyNetwork(this, clockHal_, drift_);
-        events_     = new wmt::StubEventProvider();
-        events_->setDemoDefault(clockHal_->nowUtc());
+        events_     = new wmt::BleEventProvider(clockHal_, drift_);
 
         // Configure DayBar's global minute axis from the compile-time
         // schedule extremes.
@@ -125,7 +130,7 @@ private:
     wmt::WatchyStorage      *storageHal_ = nullptr;
     wmt::WatchyThermometer  *thermoHal_  = nullptr;
     wmt::DriftTracker       *drift_      = nullptr;
-    wmt::StubEventProvider  *events_     = nullptr;
+    wmt::BleEventProvider   *events_     = nullptr;
     wmt::WatchFace          *face_       = nullptr;
 };
 

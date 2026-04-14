@@ -23,6 +23,14 @@ public:
     // actually written. Implementations must be O(1)-ish — no heap, no
     // blocking. `out` is caller-owned.
     virtual int nextEvents(int64_t fromUtc, Event *out, int maxCount) = 0;
+
+    // Optional: request a fresh sync from whatever source this provider
+    // uses (BLE advertise-and-accept, for example). Blocks up to
+    // `timeoutMs`. Returns true if a successful push arrived during the
+    // window. Default implementation returns false (not supported) — the
+    // sim and stub providers leave it that way. The Watchy BLE provider
+    // overrides it.
+    virtual bool syncNow(uint32_t /*timeoutMs*/) { return false; }
 };
 
 } // namespace wmt

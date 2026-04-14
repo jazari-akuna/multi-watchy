@@ -31,6 +31,8 @@ bool SimEventProvider::add(const char *title, int64_t startUtc, int64_t endUtc) 
     } else {
         e.title[0] = '\0';
     }
+    e.flags    = 0;
+    e._pad     = 0;
     e.startUtc = startUtc;
     e.endUtc   = endUtc;
     return true;

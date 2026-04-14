@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Watchy BLE bring-up</title>
+    <style>
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            max-width: 640px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            color: #222;
+        }
+        h1 { font-size: 1.4rem; }
+        button {
+            display: block;
+            width: 100%;
+            padding: 0.75rem 1rem;
+            margin: 0.5rem 0;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #log {
+            background: #111;
+            color: #c8e6c9;
+            padding: 0.75rem;
+            border-radius: 4px;
+            min-height: 12rem;
+            max-height: 24rem;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <h1>Watchy BLE bring-up</h1>
+    <button id="btnConnect">Connect watch</button>
+    <button id="btnClear" disabled>Send CLEAR</button>
+    <button id="btnBatch" disabled>Send test batch (3 events + TIME_SYNC)</button>
+    <button id="btnReadState" disabled>Read STATE</button>
+    <pre id="log"></pre>
+    <script type="module" src="./app.js"></script>
+</body>
+</html>

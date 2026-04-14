@@ -69,6 +69,9 @@ public:
     // Render the full face (4 cards) into the display and commit.
     void render(bool partialRefresh);
 
+    // BLE-first + WiFi-NTP-fallback sync. Called by the double-press handler.
+    void syncAll();
+
     // Open the drift-stats overlay, poll buttons, return after BACK /
     // library-menu passthrough / 10 s idle. Caller must then repaint
     // the watchface (or let the library handle it if we exited to menu).
@@ -78,12 +81,6 @@ private:
     void renderMainCard();
     void renderAltCard(Rect slot, int tzIndex);
     void renderEventCard();
-
-    // Connect WiFi, run NTP, disconnect. Overlays sync status on the
-    // display for ~1.5 s, then re-renders the face via partial refresh.
-    // The only path that touches WiFi — no background auto-sync; BLE-driven
-    // resync will replace this with a push model later.
-    void forceSync();
 
     // Poll buttons for 10 s after a button-driven partial refresh.
     // Handles rapid UP cycling inline; breaks early on other presses.

@@ -144,10 +144,32 @@ void WatchFace::onWake() {
             settleThenFullRefresh();
             return;
 
-        case Button::Down:
-            forceSync();
-            settleThenFullRefresh();
+        case Button::Down: {
+            // Drain the initial press (debounce + wait for release).
+            if (d_.buttons && d_.power) {
+                while (d_.buttons->isPressed(Button::Down)) d_.power->delayMs(5);
+            }
+            // Window for a second press.
+            bool isDouble = false;
+            if (d_.buttons && d_.power) {
+                constexpr uint32_t WINDOW_MS = 500;
+                const uint32_t start = d_.power->millisNow();
+                while (d_.power->millisNow() - start < WINDOW_MS) {
+                    if (d_.buttons->isPressed(Button::Down)) {
+                        isDouble = true;
+                        while (d_.buttons->isPressed(Button::Down)) d_.power->delayMs(5);
+                        break;
+                    }
+                    d_.power->delayMs(10);
+                }
+            }
+            if (isDouble) {
+                syncAll();
+                settleThenFullRefresh();
+            }
+            // Single press → no-op. Just return so the next sleep cycle handles it.
             return;
+        }
 
         case Button::Menu:
             // The Watchy platform shim routes MENU to the Watchy library's
@@ -162,7 +184,7 @@ void WatchFace::onWake() {
     }
 }
 
-// ---------- Forced NTP sync -------------------------------------------------
+// ---------- Sync (BLE → WiFi/NTP fallback) ----------------------------------
 
 // Simple centred overlay painter. Uses whatever font the platform had set
 // — the shim is responsible for configuring a reasonable default before
@@ -180,23 +202,32 @@ static void drawOverlay(IDisplay *d, const char *msg) {
     d->commit(/*partialRefresh=*/true);
 }
 
-void WatchFace::forceSync() {
+void WatchFace::syncAll() {
     if (d_.display == nullptr) return;
 
-    drawOverlay(d_.display, "Syncing NTP...");
+    // Try BLE first. syncNow() returns false if the provider doesn't
+    // support BLE sync (sim, stub) OR timed out without a commit.
+    drawOverlay(d_.display, "Syncing BLE...");
+    bool bleOk = false;
+    if (d_.events != nullptr) {
+        bleOk = d_.events->syncNow(10000);   // 10 s advertise window
+    }
 
-    bool ok = false;
-    if (d_.network != nullptr) {
+    bool wifiOk = false;
+    if (!bleOk && d_.network != nullptr) {
+        drawOverlay(d_.display, "Syncing WiFi...");
         if (d_.network->connect()) {
-            ok = d_.network->syncNtp();
+            wifiOk = d_.network->syncNtp();
         }
         d_.network->disconnect();
     }
 
-    drawOverlay(d_.display, ok ? "Sync OK" : "Sync FAIL");
-    if (d_.power != nullptr) d_.power->delayMs(1500);
+    const char *msg = bleOk ? "BLE Sync OK"
+                     : wifiOk ? "WiFi NTP OK"
+                             : "Sync FAIL";
+    drawOverlay(d_.display, msg);
+    if (d_.power) d_.power->delayMs(1500);
 
-    // Re-render the real face (partial).
     render(/*partialRefresh=*/true);
 }
 
