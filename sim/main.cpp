@@ -181,7 +181,9 @@ int main(int argc, char **argv) {
     // place the event in the past (useful for testing in-event inversion).
     // Defaults: starts +1 h, ends +2 h (i.e. not active yet).
     wmt::Event demo{};
-    std::snprintf(demo.title, sizeof demo.title, "Next event displayed here");
+    const char *titleEnv = std::getenv("SIM_EVENT_TITLE");
+    std::snprintf(demo.title, sizeof demo.title, "%s",
+                  titleEnv ? titleEnv : "Next event displayed here");
     const char *evOffsetEnv = std::getenv("SIM_EVENT_OFFSET");
     const int64_t startOff = evOffsetEnv ? std::atoll(evOffsetEnv) : 3600;
     demo.startUtc = nowUtc + startOff;

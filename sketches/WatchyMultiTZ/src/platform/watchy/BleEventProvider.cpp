@@ -42,6 +42,11 @@ BleEventProvider *BleEventProvider::s_instance = nullptr;
 // STATE characteristic, valid only for the duration of a syncNow() window.
 static BLECharacteristic *s_stateChar = nullptr;
 
+// Tracks whether a peer is currently connected. Maintained by ServerCb
+// callbacks; read by the syncNow() wait loop to keep BLE alive while a
+// push is in flight.
+static volatile bool s_clientConnected = false;
+
 // ---------- Packet queue (callback task → sync task) -----------------------
 
 static constexpr int QUEUE_CAP = 16;  // headroom for TIME_SYNC + 10×EVENT + BATCH_END
@@ -114,7 +119,10 @@ static void packStateInto(uint8_t out[16]) {
     memset(out, 0, 16);
     writeI64LE(out + 0, g_lastSyncUtc);
     writeU16LE(out + 8, (uint16_t)g_ringCount);
-    out[10] = 0x01;
+    out[10] = 0x02;  // schemaVer — bumped because of batteryPct in [11]
+    out[11] = BleEventProvider::s_instance
+                  ? BleEventProvider::s_instance->batteryPercent()
+                  : 0;
 }
 
 // ---------- BLE write callback ---------------------------------------------
@@ -154,14 +162,25 @@ void BleEventProvider::saveToNvs() {
 
 // ---------- ctor + accessors -----------------------------------------------
 
-BleEventProvider::BleEventProvider(WatchyClock *clock, DriftTracker *drift)
-    : clock_(clock), drift_(drift) {
+BleEventProvider::BleEventProvider(WatchyClock *clock, DriftTracker *drift, IPower *power)
+    : clock_(clock), drift_(drift), power_(power) {
     s_instance = this;
     loadFromNvs();
 }
 
 int64_t  BleEventProvider::lastSyncUtc() const { return g_lastSyncUtc; }
 uint16_t BleEventProvider::eventCount() const  { return (uint16_t)g_ringCount; }
+
+uint8_t BleEventProvider::batteryPercent() const {
+    if (!power_) return 0;
+    const float v = power_->batteryVoltage();
+    constexpr float V_EMPTY = 3.30f;
+    constexpr float V_FULL  = 4.20f;
+    float frac = (v - V_EMPTY) / (V_FULL - V_EMPTY);
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+    return (uint8_t)(frac * 100.0f + 0.5f);
+}
 
 // ---------- IEventProvider -------------------------------------------------
 
@@ -182,7 +201,7 @@ int BleEventProvider::nextEvents(int64_t fromUtc, Event *out, int maxCount) {
     return n;
 }
 
-bool BleEventProvider::syncNow(uint32_t timeoutMs) {
+bool BleEventProvider::syncNow(uint32_t timeoutMs, IButtons *abortOn) {
     batchArrived_ = false;
     accumCount_   = 0;
     queueReset();
@@ -190,11 +209,16 @@ bool BleEventProvider::syncNow(uint32_t timeoutMs) {
     BLEDevice::init(ADV_NAME);
     BLEServer *server = BLEDevice::createServer();
 
-    // Auto-resume advertising when the peer disconnects — bluedroid does
-    // not do this by default, so mid-session reconnects (and the harness's
-    // reconnect test case) would otherwise find the watch unreachable.
+    // Track peer connection state so syncNow()'s wait loop doesn't tear
+    // down BLE mid-transaction. Auto-resume advertising on disconnect
+    // (bluedroid does not, by default), so the harness's reconnect case
+    // and real-world reconnects work.
     class ServerCb : public BLEServerCallbacks {
+        void onConnect(BLEServer *) override {
+            s_clientConnected = true;
+        }
         void onDisconnect(BLEServer *s) override {
+            s_clientConnected = false;
             s->getAdvertising()->start();
         }
     };
@@ -227,18 +251,45 @@ bool BleEventProvider::syncNow(uint32_t timeoutMs) {
     // may push multiple batches in one session (e.g. test harness running
     // several cases, or a phone re-syncing). `batchArrived_` is sticky: we
     // return true at the end if any batch committed during the window.
+    // Wait loop. Exit conditions, in priority order:
+    //   1. Any button pressed → immediate abort.
+    //   2. A batch has committed AND no further packets arrived for
+    //      POST_COMMIT_IDLE_MS → phone's done pushing, we can close.
+    //   3. timeoutMs elapsed AND no peer currently connected.
+    //
+    // The idle-after-commit exit is what prevents "stuck in Syncing BLE":
+    // Gadgetbridge happily keeps the GATT connection alive indefinitely
+    // after its last write, so without this the loop would never end.
+    constexpr unsigned long POST_COMMIT_IDLE_MS = 2000;
     const unsigned long start = millis();
+    unsigned long lastPacketMs = 0;
     bool everCommitted = false;
-    while ((millis() - start) < timeoutMs) {
+    while (true) {
         uint8_t buf[64];
         uint8_t len = 0;
+        bool gotAny = false;
         while (queuePop(buf, len)) {
             onWritePacket(buf, len);
+            gotAny = true;
         }
+        if (gotAny) lastPacketMs = millis();
         if (batchArrived_) {
             everCommitted = true;
-            batchArrived_ = false;  // ready for next batch in same session
+            batchArrived_ = false;
+            lastPacketMs = millis();
         }
+        if (abortOn && (abortOn->isPressed(Button::Back) ||
+                        abortOn->isPressed(Button::Menu) ||
+                        abortOn->isPressed(Button::Up)   ||
+                        abortOn->isPressed(Button::Down))) {
+            break;
+        }
+        const unsigned long now = millis();
+        const bool idleAfterCommit =
+            everCommitted && (now - lastPacketMs) >= POST_COMMIT_IDLE_MS;
+        if (idleAfterCommit) break;
+        const bool timedOut = (now - start) >= timeoutMs;
+        if (timedOut && !s_clientConnected) break;
         delay(50);
     }
 

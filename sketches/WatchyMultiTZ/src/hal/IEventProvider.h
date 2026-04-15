@@ -14,6 +14,8 @@
 
 namespace wmt {
 
+class IButtons;
+
 class IEventProvider {
 public:
     virtual ~IEventProvider() = default;
@@ -27,10 +29,11 @@ public:
     // Optional: request a fresh sync from whatever source this provider
     // uses (BLE advertise-and-accept, for example). Blocks up to
     // `timeoutMs`. Returns true if a successful push arrived during the
-    // window. Default implementation returns false (not supported) — the
-    // sim and stub providers leave it that way. The Watchy BLE provider
-    // overrides it.
-    virtual bool syncNow(uint32_t /*timeoutMs*/) { return false; }
+    // window. If `abortOn` is non-null, the implementation polls
+    // `abortOn->isPressed(Button::Back)` and exits early when held, so the
+    // user can escape a stuck sync. Default implementation returns false.
+    virtual bool syncNow(uint32_t /*timeoutMs*/,
+                         IButtons * /*abortOn*/ = nullptr) { return false; }
 };
 
 } // namespace wmt

@@ -82,7 +82,7 @@ void WatchFace::renderAltCard(Rect slot, int tzIndex) {
 void WatchFace::renderEventCard() {
     const int mainIdx = ((mainIdx_ % d_.numZones) + d_.numZones) % d_.numZones;
     RenderCtx ctx = makeCtx(d_, d_.clock->nowUtc(), mainIdx);
-    // EventCard decides its own inversion (currently: in-event-or-not).
+    ctx.eventCycleIdx = eventCycleIdx_;
     EventCard::render(d_.display, SLOT_EVENT, ctx, /*inverted_ignored=*/false);
 }
 
@@ -145,29 +145,31 @@ void WatchFace::onWake() {
             return;
 
         case Button::Down: {
-            // Drain the initial press (debounce + wait for release).
+            // Long-press (≥2 s held) → sync. Short-press → cycle event card.
+            constexpr uint32_t LONG_PRESS_MS = 2000;
+            bool longPress = false;
             if (d_.buttons && d_.power) {
-                while (d_.buttons->isPressed(Button::Down)) d_.power->delayMs(5);
-            }
-            // Window for a second press.
-            bool isDouble = false;
-            if (d_.buttons && d_.power) {
-                constexpr uint32_t WINDOW_MS = 500;
                 const uint32_t start = d_.power->millisNow();
-                while (d_.power->millisNow() - start < WINDOW_MS) {
-                    if (d_.buttons->isPressed(Button::Down)) {
-                        isDouble = true;
+                while (d_.buttons->isPressed(Button::Down)) {
+                    if (d_.power->millisNow() - start >= LONG_PRESS_MS) {
+                        longPress = true;
+                        // Drain the remainder of the hold so we don't re-detect.
                         while (d_.buttons->isPressed(Button::Down)) d_.power->delayMs(5);
                         break;
                     }
                     d_.power->delayMs(10);
                 }
             }
-            if (isDouble) {
+            if (longPress) {
                 syncAll();
+                eventCycleIdx_ = 0;
+                settleThenFullRefresh();
+            } else {
+                // Short press → cycle to next upcoming event on the card.
+                eventCycleIdx_++;
+                render(/*partialRefresh=*/true);
                 settleThenFullRefresh();
             }
-            // Single press → no-op. Just return so the next sleep cycle handles it.
             return;
         }
 
@@ -205,27 +207,15 @@ static void drawOverlay(IDisplay *d, const char *msg) {
 void WatchFace::syncAll() {
     if (d_.display == nullptr) return;
 
-    // Try BLE first. syncNow() returns false if the provider doesn't
-    // support BLE sync (sim, stub) OR timed out without a commit.
+    // BLE only. WiFi path was removed at user request — time comes from
+    // the phone's TIME_SYNC packet (first byte of every pushed batch).
     drawOverlay(d_.display, "Syncing BLE...");
     bool bleOk = false;
     if (d_.events != nullptr) {
-        bleOk = d_.events->syncNow(10000);   // 10 s advertise window
+        bleOk = d_.events->syncNow(60000, d_.buttons);   // 60 s, any-button-abortable
     }
 
-    bool wifiOk = false;
-    if (!bleOk && d_.network != nullptr) {
-        drawOverlay(d_.display, "Syncing WiFi...");
-        if (d_.network->connect()) {
-            wifiOk = d_.network->syncNtp();
-        }
-        d_.network->disconnect();
-    }
-
-    const char *msg = bleOk ? "BLE Sync OK"
-                     : wifiOk ? "WiFi NTP OK"
-                             : "Sync FAIL";
-    drawOverlay(d_.display, msg);
+    drawOverlay(d_.display, bleOk ? "BLE Sync OK" : "BLE Sync FAIL");
     if (d_.power) d_.power->delayMs(1500);
 
     render(/*partialRefresh=*/true);
@@ -262,6 +252,7 @@ void WatchFace::openDriftStats() {
 void WatchFace::settleThenFullRefresh() {
     if (d_.power == nullptr || d_.buttons == nullptr) {
         // Can't poll — just do the full refresh immediately.
+        eventCycleIdx_ = 0;
         render(/*partialRefresh=*/false);
         return;
     }
@@ -274,9 +265,8 @@ void WatchFace::settleThenFullRefresh() {
         const uint32_t now = d_.power->millisNow();
         if (now - lastActivity >= SETTLE_MS) break;
 
-        // UP → cycle inline.
+        // UP → cycle main zone inline.
         if (d_.buttons->isPressed(Button::Up)) {
-            // Debounce release.
             while (d_.buttons->isPressed(Button::Up)) d_.power->delayMs(5);
             mainIdx_ = ((mainIdx_ + 1) % d_.numZones + d_.numZones) % d_.numZones;
             render(/*partialRefresh=*/true);
@@ -284,11 +274,18 @@ void WatchFace::settleThenFullRefresh() {
             continue;
         }
 
-        // Any of the other three buttons → break so the next wake cycle
-        // handles it. We don't want to consume presses here that the
-        // platform has its own plans for (e.g. MENU on Watchy).
-        if (d_.buttons->isPressed(Button::Down) ||
-            d_.buttons->isPressed(Button::Menu) ||
+        // DOWN (short press) → cycle to next event on the event card inline.
+        if (d_.buttons->isPressed(Button::Down)) {
+            while (d_.buttons->isPressed(Button::Down)) d_.power->delayMs(5);
+            eventCycleIdx_++;
+            render(/*partialRefresh=*/true);
+            lastActivity = d_.power->millisNow();
+            continue;
+        }
+
+        // MENU / BACK → break so the next wake handles them (MENU opens the
+        // library menu on Watchy; BACK is reserved).
+        if (d_.buttons->isPressed(Button::Menu) ||
             d_.buttons->isPressed(Button::Back)) {
             break;
         }
@@ -296,7 +293,9 @@ void WatchFace::settleThenFullRefresh() {
         d_.power->delayMs(POLL_MS);
     }
 
-    // Quiescence → one full refresh.
+    // Quiescence → reset the event browse offset so the full refresh shows
+    // the "next upcoming" event again, and do the full refresh itself.
+    eventCycleIdx_ = 0;
     render(/*partialRefresh=*/false);
 }
 

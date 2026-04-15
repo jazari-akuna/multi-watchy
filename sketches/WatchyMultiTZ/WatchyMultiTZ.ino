@@ -25,6 +25,9 @@
 // lost on battery pull (defaults to 0 on cold boot, which means "SZX main").
 // -----------------------------------------------------------------------------
 RTC_DATA_ATTR int g_mainIdx = 2;   // default: ZRH as main (matches mockup)
+// Minute-tick counter. Every 30 minutes the watchface opens a short silent
+// BLE advertise window so Gadgetbridge can reconnect and push fresh events.
+RTC_DATA_ATTR uint16_t g_minutesSinceBleSync = 0;
 
 // The Watchy library uses its own watchySettings struct (cityID, weather
 // settings, NTP server, etc.). We build a light instance so the library's
@@ -55,15 +58,18 @@ public:
 
     void drawWatchFace() override {
         ensureFace();
-        // Cold boot (battery pull or flash) → advertise BLE for 60 s so a
-        // companion app (or an automated test harness) can pair / push a
-        // batch without a human button press.
-        if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
-            events_->syncNow(60000);
+        // Periodic silent sync: every 30 minute-tick wakes, open a short
+        // BLE advertise window so a nearby Gadgetbridge can push updates.
+        // Skipped on cold boot (wakeup cause == UNDEFINED) per user directive.
+        if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED) {
+            if (g_minutesSinceBleSync < 65535) ++g_minutesSinceBleSync;
+            if (g_minutesSinceBleSync >= 30) {
+                g_minutesSinceBleSync = 0;
+                // 10 s silent advertise. nullptr for abort-on-button = don't
+                // let casual button touches kill a passive background sync.
+                events_->syncNow(10000, nullptr);
+            }
         }
-        // Base class already populated currentTime via RTC.read() before
-        // calling us on minute-tick wakes. The face doesn't care — it reads
-        // UTC directly via the Clock HAL.
         face_->render(/*partialRefresh=*/true);
     }
 
@@ -101,7 +107,7 @@ private:
 
         clockHal_   = new wmt::WatchyClock(Watchy::RTC, drift_, thermoHal_);
         networkHal_ = new wmt::WatchyNetwork(this, clockHal_, drift_);
-        events_     = new wmt::BleEventProvider(clockHal_, drift_);
+        events_     = new wmt::BleEventProvider(clockHal_, drift_, powerHal_);
 
         // Configure DayBar's global minute axis from the compile-time
         // schedule extremes.

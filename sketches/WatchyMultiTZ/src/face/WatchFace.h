@@ -38,6 +38,10 @@ struct RenderCtx {
                                      // (used by EventBar to shade the 8-hour
                                      // window by work/off status)
     float           batteryVolts;    // current battery voltage (0 if unknown)
+    int             eventCycleIdx = 0;  // offset into the upcoming-events list
+                                        // that the event card should display
+                                        // (advanced by short DOWN presses,
+                                        // reset to 0 on full-refresh settle).
 };
 
 struct WatchFaceDeps {
@@ -89,6 +93,7 @@ private:
 
     WatchFaceDeps d_;
     int          &mainIdx_;   // index into d_.zones
+    int           eventCycleIdx_ = 0;   // event-card browsing offset
 };
 
 } // namespace wmt

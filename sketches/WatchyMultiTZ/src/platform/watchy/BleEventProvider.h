@@ -20,10 +20,11 @@
 //        0x04 CLEAR       discards accumulator; empties the ring
 //
 // STATE read/notify layout (16 B):
-//   [0..7]  lastSyncUtc  int64
-//   [8..9]  eventCount   uint16
-//   [10]    schemaVer    uint8 = 1
-//   [11..15] reserved
+//   [0..7]   lastSyncUtc    int64
+//   [8..9]   eventCount     uint16
+//   [10]     schemaVer      uint8 = 2 (was 1; bumped for batteryPct byte)
+//   [11]     batteryPct     uint8 0..100 (schemaVer >= 2 only)
+//   [12..15] reserved
 //
 // A single phone-initiated sync session looks like:
 //   TIME_SYNC → EVENT × N → BATCH_END
@@ -32,6 +33,8 @@
 // accumulator into the ring and persists to NVS.
 
 #include "../../hal/IEventProvider.h"
+#include "../../hal/IButtons.h"
+#include "../../hal/IPower.h"
 #include "../../hal/Types.h"
 
 #include <stdint.h>
@@ -64,8 +67,9 @@ public:
     static constexpr uint8_t TAG_CLEAR     = 0x04;
 
     // Construct. `clock` and `drift` may be nullptr — time-sync packets
-    // are then silently dropped (useful for minimal bring-up).
-    BleEventProvider(WatchyClock *clock, DriftTracker *drift);
+    // are then silently dropped (useful for minimal bring-up). `power` may
+    // also be nullptr — STATE char then reports battery = 0 (unknown).
+    BleEventProvider(WatchyClock *clock, DriftTracker *drift, IPower *power = nullptr);
 
     // IEventProvider interface ---------------------------------------------
     int  nextEvents(int64_t fromUtc, Event *out, int maxCount) override;
@@ -74,18 +78,22 @@ public:
     // successful phone-initiated sync (BATCH_END received). Returns true
     // if a batch committed during the window. Turns BLE off on return so
     // the library's OTA path can still open BLE later without conflict.
-    bool syncNow(uint32_t timeoutMs) override;
+    bool syncNow(uint32_t timeoutMs, IButtons *abortOn = nullptr) override;
 
     // Accessors (used by tests + the STATE characteristic packer).
     int64_t lastSyncUtc() const;
     uint16_t eventCount() const;
+    uint8_t  batteryPercent() const;   // 0..100; 0 if power HAL absent
+
+    // Singleton, used by BLE callbacks (see `s_instance` comment below).
+    // Exposed public so file-static helpers in the .cpp can reach accessors.
+    static BleEventProvider *s_instance;
 
 private:
     // GATT event hooks live as static free functions in the .cpp — the
     // BLE server callbacks require C-style function pointers (well,
     // subclasses of BLECharacteristicCallbacks). We route them back into
     // a singleton instance via s_instance.
-    static BleEventProvider *s_instance;
 
     void onWritePacket(const uint8_t *data, size_t len);
     void commitBatch();
@@ -96,6 +104,7 @@ private:
 
     WatchyClock  *clock_;
     DriftTracker *drift_;
+    IPower       *power_;
 
     // Accumulator for in-flight batch (not persisted).
     Event   accum_[RING_CAPACITY];
