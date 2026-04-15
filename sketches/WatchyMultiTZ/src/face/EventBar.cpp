@@ -5,18 +5,6 @@ namespace wmt {
 // Window width in seconds: 8 hours.
 static constexpr int64_t WINDOW_SECS = 8 * 3600;
 
-// Fill a rectangle with a 2x2 checker of fg/bg pixels (reads as grey).
-// Used only for the "lunch" schedule shading.
-static void fillHatch(IDisplay *d, Rect r, Ink fg, Ink bg) {
-    for (int16_t yy = 0; yy < r.h; yy++) {
-        for (int16_t xx = 0; xx < r.w; xx++) {
-            const bool even = (((xx) ^ (yy)) & 1) == 0;
-            d->drawPixel((int16_t)(r.x + xx), (int16_t)(r.y + yy),
-                         even ? fg : bg);
-        }
-    }
-}
-
 // Per-column schedule category — used to pick event-border ink that
 // contrasts with the bar background adjacent to each event edge.
 enum ColBg : uint8_t { BG_WORK = 0, BG_NIGHT = 1, BG_LUNCH = 2 };

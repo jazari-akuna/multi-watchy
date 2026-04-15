@@ -1,6 +1,18 @@
 # Arduino build artifacts (regenerable from source)
 build/
 
+# QR code data is generated locally; source images + generated header +
+# rendered previews are likely private (personal WhatsApp/WeChat/etc).
+# Committed: tools/qr_sources_example/  (placeholder images)
+#            sketches/WatchyMultiTZ/src/assets/qr_codes.h.example
+# Private:   anything under tools/qr_sources/, the real qr_codes.h,
+#            and rendered PNGs named docs/img/qr_*.png.
+tools/qr_sources/*
+!tools/qr_sources/.gitkeep
+sketches/WatchyMultiTZ/src/assets/qr_codes.h
+docs/img/qr_*.png
+!docs/img/qr_example_*.png
+
 # Vendored upstream library, re-clone with:
 #   git clone https://github.com/sqfmi/Watchy.git
 #   cd Watchy && git checkout v1.4.15

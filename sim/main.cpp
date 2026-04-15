@@ -23,6 +23,7 @@
 #include "face/DayBar.h"
 #include "face/DriftTracker.h"
 #include "face/DriftStatsScreen.h"
+#include "face/QrScreen.h"
 
 // Sim backends.
 #include "SimDisplay.h"
@@ -51,19 +52,20 @@ struct Args {
     float       battery = 3.9f;
     int         mainIdx = 2;
     std::string out     = "out/screenshot.png";
-    std::string screen  = "face";    // "face" or "drift"
+    std::string screen  = "face";    // "face" | "drift" | "qr"
     int         page    = 0;         // drift page (0 = overview, 1 = graph)
     int         tempC   = 25;        // SimThermometer reading
     std::string sync    = "none";    // none|busy|ok|fail — force the
                                      // main-card sync badge state
+    int         qrIdx   = 0;         // which QR to render when --screen=qr
 };
 
 void printUsage(const char *argv0) {
     std::fprintf(stderr,
         "usage: %s [--time YYYY-MM-DDTHH:MM] [--battery V] "
         "[--main-idx 0|1|2] [--out PATH] "
-        "[--screen face|drift] [--page 0|1] [--temp C] "
-        "[--sync none|busy|ok|fail]\n",
+        "[--screen face|drift|qr] [--page 0|1] [--temp C] "
+        "[--sync none|busy|ok|fail] [--qr-idx N]\n",
         argv0);
 }
 
@@ -96,10 +98,13 @@ bool parseArgs(int argc, char **argv, Args &a) {
         } else if (!std::strcmp(k, "--screen")) {
             const char *v = needsVal(k); if (!v) return false;
             a.screen = v;
-            if (a.screen != "face" && a.screen != "drift") {
-                std::fprintf(stderr, "error: --screen must be 'face' or 'drift'\n");
+            if (a.screen != "face" && a.screen != "drift" && a.screen != "qr") {
+                std::fprintf(stderr, "error: --screen must be 'face', 'drift', or 'qr'\n");
                 return false;
             }
+        } else if (!std::strcmp(k, "--qr-idx")) {
+            const char *v = needsVal(k); if (!v) return false;
+            a.qrIdx = std::atoi(v);
         } else if (!std::strcmp(k, "--page")) {
             const char *v = needsVal(k); if (!v) return false;
             a.page = std::atoi(v);
@@ -224,6 +229,10 @@ int main(int argc, char **argv) {
     if (args.screen == "face") {
         // Render one frame (partial refresh doesn't matter for sim).
         face.render(/*partialRefresh=*/false);
+    } else if (args.screen == "qr") {
+        // --screen=qr: render a single QR code from assets/qr_codes.h.
+        wmt::QrScreen::renderOne(&display, args.qrIdx);
+        display.commit(/*partial=*/false);
     } else {
         // --screen=drift: render the DriftStatsScreen with synthetic state.
         // The watchface composition above is still useful (sets up display),

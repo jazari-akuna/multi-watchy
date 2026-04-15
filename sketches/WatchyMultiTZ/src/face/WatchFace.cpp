@@ -14,6 +14,7 @@
 #include "Slot.h"
 #include "Schedule.h"
 #include "DriftStatsScreen.h"
+#include "QrScreen.h"
 #include "cards/TimeZoneCard.h"
 #include "cards/EventCard.h"
 
@@ -32,11 +33,6 @@ static int dayOrdinal(const LocalDateTime &t) {
     // adjacent-date differ by roughly 1. A more correct form would use
     // tm_yday, but LocalDateTime doesn't carry it — the approximation is
     // exact for deltas in {-1, 0, +1} which is all the watchface displays.
-}
-
-static const char *zoneTZ(const WatchFaceDeps &d, int idx) {
-    const int i = ((idx % d.numZones) + d.numZones) % d.numZones;
-    return d.zones[i].posixTZ;
 }
 
 // ---------- Card delegates --------------------------------------------------
@@ -258,6 +254,15 @@ void WatchFace::runSync(uint32_t timeoutMs, IButtons *abortOn) {
     //    the check/cross into the next wake cycle.
     syncStatus_ = SyncStatus::None;
     render(/*partialRefresh=*/true);
+}
+
+void WatchFace::openQrCodes() {
+    if (d_.display == nullptr || d_.buttons == nullptr || d_.power == nullptr) {
+        return;
+    }
+    QrScreen screen(d_.display, d_.buttons, d_.power);
+    (void)screen.run();   // both exit reasons funnel to the same full-refresh
+    render(/*partialRefresh=*/false);
 }
 
 void WatchFace::openDriftStats() {

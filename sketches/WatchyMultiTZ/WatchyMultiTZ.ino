@@ -90,6 +90,18 @@ public:
             Watchy::handleButtonPress();
             return;
         }
+        if (wake & BACK_BTN_MASK) {
+            // From the watchface, BACK opens the QR-cycle overlay. Any
+            // non-watchface state (library menu) falls back to the default
+            // library handler so the user can navigate back.
+            if (guiState == WATCHFACE_STATE) {
+                ensureFace();
+                face_->openQrCodes();
+                return;
+            }
+            Watchy::handleButtonPress();
+            return;
+        }
         ensureFace();
         face_->onWake();
     }

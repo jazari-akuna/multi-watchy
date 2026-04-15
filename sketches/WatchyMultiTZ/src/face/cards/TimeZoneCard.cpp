@@ -9,7 +9,6 @@
 
 #include "fonts/DSEG7_Classic_Bold_25.h"
 #include "fonts/DSEG7_Classic_Regular_15.h"
-#include "fonts/DSEG7_Classic_Regular_39.h"
 #include "fonts/Seven_Segment10pt7b.h"
 #include "fonts/MyCompactFont.h"   // custom 4x7 — TUE / APR / +Nd badge
 #include "assets/icons.h"         // drawVerticalBattery

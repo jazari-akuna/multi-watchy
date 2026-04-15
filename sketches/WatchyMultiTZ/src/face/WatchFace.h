@@ -105,6 +105,11 @@ public:
     // the watchface (or let the library handle it if we exited to menu).
     void openDriftStats();
 
+    // Open the QR-cycle overlay (pre-baked codes from assets/qr_codes.h).
+    // Each BACK press advances; pressing past the last code or 30 s of
+    // idle returns to the watchface with a full refresh.
+    void openQrCodes();
+
     // Sim/debug hook: force a badge state without running an actual sync.
     // The firmware path should drive status transitions through runSync();
     // this setter exists so the simulator can render each state for visual
