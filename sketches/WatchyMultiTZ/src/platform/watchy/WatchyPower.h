@@ -18,6 +18,7 @@ public:
     void     deepSleep() override;        // never returns
     void     delayMs(uint32_t ms) override;
     uint32_t millisNow() override;
+    void     buzz(int pulses) override;
 
 private:
     ::Watchy *parent_;

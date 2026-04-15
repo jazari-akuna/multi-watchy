@@ -91,6 +91,12 @@ private:
     // On 10 s of quiescence, commits one full refresh to clear ghosting.
     void settleThenFullRefresh();
 
+    // Called on each minute-tick wake. Buzzes the haptic motor for:
+    //   - top-of-the-hour (minute-of-hour == 0): 2 short pulses
+    //   - 1 h before any upcoming event start:  1 short pulse
+    //   - 5 min before any upcoming event start: 1 short pulse
+    void maybeBuzzReminders();
+
     WatchFaceDeps d_;
     int          &mainIdx_;   // index into d_.zones
     int           eventCycleIdx_ = 0;   // event-card browsing offset

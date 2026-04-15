@@ -132,7 +132,8 @@ void WatchFace::onWake() {
 
     switch (b) {
         case Button::None:
-            // Minute-tick wake (timer alarm). Partial refresh only.
+            // Minute-tick wake (timer alarm). Buzz reminders + partial refresh.
+            maybeBuzzReminders();
             render(/*partialRefresh=*/true);
             return;
 
@@ -202,6 +203,38 @@ static void drawOverlay(IDisplay *d, const char *msg) {
     if (y < 0) y = 0;
     d->drawText(x, y, msg);
     d->commit(/*partialRefresh=*/true);
+}
+
+void WatchFace::maybeBuzzReminders() {
+    if (d_.power == nullptr || d_.clock == nullptr) return;
+
+    const int64_t nowUtc = d_.clock->nowUtc();
+
+    // Hour tick: minute-of-hour == 0 in the MAIN zone's local time.
+    const int mainIdx = ((mainIdx_ % d_.numZones) + d_.numZones) % d_.numZones;
+    const char *posixTZ = d_.zones[mainIdx].posixTZ;
+    const int   minuteOfDay = d_.clock->minuteOfDay(nowUtc, posixTZ);
+    const bool  hourTick    = (minuteOfDay % 60) == 0;
+
+    // Event reminders: scan the next-events window for any start that
+    // lands in this minute-tick's [t, t+60 s) window minus the reminder
+    // offset. We wake every ~60 s, so the window is exactly one minute.
+    bool buzz1h  = false;
+    bool buzz5m  = false;
+    if (d_.events != nullptr) {
+        Event upcoming[8];
+        const int n = d_.events->nextEvents(nowUtc, upcoming, 8);
+        for (int i = 0; i < n; ++i) {
+            const int64_t deltaSec = upcoming[i].startUtc - nowUtc;
+            // ±30 s tolerance around the reminder boundary so a wake that
+            // lands a few seconds early/late still triggers exactly once.
+            if (deltaSec >= 3570 && deltaSec < 3630) buzz1h = true;
+            if (deltaSec >=  270 && deltaSec <  330) buzz5m = true;
+        }
+    }
+
+    if (hourTick)               d_.power->buzz(2);
+    else if (buzz1h || buzz5m)  d_.power->buzz(1);
 }
 
 void WatchFace::syncAll() {

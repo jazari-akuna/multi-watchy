@@ -21,6 +21,11 @@ public:
 
     // Monotonic milliseconds since boot/start.
     virtual uint32_t millisNow() = 0;
+
+    // Buzz the haptic motor `pulses` times, each pulse ~80 ms long with
+    // ~120 ms gaps. Default impl is a no-op so sim/stub HALs don't need
+    // to implement it.
+    virtual void buzz(int /*pulses*/) {}
 };
 
 } // namespace wmt
