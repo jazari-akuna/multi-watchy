@@ -1,6 +1,8 @@
-# watch-legacy
+# watchy-multitz
 
-Personal workspace for an SQFMI Watchy (ESP32-PICO-D4, 1.54" e-paper, 200x200 1-bit).
+Firmware for a custom **multi-timezone watchface** for the SQFMI Watchy
+(ESP32-PICO-D4, 1.54" e-paper, 200x200 1-bit). Companion phone-side code
+lives in the sister repo at `../watchy-companion/`.
 
 ## Layout
 
