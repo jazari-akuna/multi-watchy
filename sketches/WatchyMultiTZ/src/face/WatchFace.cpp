@@ -131,9 +131,9 @@ void WatchFace::onWake() {
 
     switch (b) {
         case Button::None:
-            // Minute-tick wake (timer alarm). Buzz reminders + partial refresh.
-            maybeBuzzReminders();
-            render(/*partialRefresh=*/true);
+            // Should not happen on Watchy: EXT1 wakes always carry a button
+            // mask, and minute-tick wakes go through drawWatchFace() in the
+            // platform shim — never onWake(). Defensive no-op.
             return;
 
         case Button::Up:
@@ -161,9 +161,11 @@ void WatchFace::onWake() {
                 }
             }
             if (longPress) {
-                syncAll();
+                syncAll();                   // runSync() ends with a full refresh
                 eventCycleIdx_ = 0;
-                settleThenFullRefresh();
+                // No settleThenFullRefresh here — runSync already flushed a
+                // clean full-refresh frame, so running the settle loop would
+                // just wait 10 s for a redundant second full refresh.
             } else {
                 // Short press → cycle to next upcoming event on the card.
                 eventCycleIdx_++;
@@ -242,7 +244,8 @@ void WatchFace::runSync(uint32_t timeoutMs, IButtons *abortOn) {
         ok = d_.events->syncNow(timeoutMs, abortOn);
     }
 
-    // 3. Flip badge to check/cross and redraw so the user sees the outcome.
+    // 3. Flip badge to check/cross with a partial refresh so the user sees
+    //    the outcome as a quick overlay (no disruptive flash yet).
     syncStatus_ = ok ? SyncStatus::Success : SyncStatus::Failure;
     render(/*partialRefresh=*/true);
 
@@ -250,10 +253,12 @@ void WatchFace::runSync(uint32_t timeoutMs, IButtons *abortOn) {
     //    purely visual.
     if (d_.power) d_.power->delayMs(2000);
 
-    // 5. Clear the badge and repaint once so the resting face doesn't carry
-    //    the check/cross into the next wake cycle.
+    // 5. Clear the badge AND do the full refresh here so the e-ink
+    //    "complete refresh" flash happens AFTER the check/cross was
+    //    displayed, not before it. Callers no longer need a separate
+    //    settleThenFullRefresh() pass.
     syncStatus_ = SyncStatus::None;
-    render(/*partialRefresh=*/true);
+    render(/*partialRefresh=*/false);
 }
 
 void WatchFace::openQrCodes() {

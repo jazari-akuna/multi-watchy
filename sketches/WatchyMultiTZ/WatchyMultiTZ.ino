@@ -44,7 +44,13 @@ static watchySettings libSettings{
     /*weatherUpdateInterval=*/(int8_t)wmt::WEATHER_UPDATE_MIN,
     /*ntpServer=*/            String(wmt::NTP_SERVER),
     /*gmtOffset=*/            wmt::GMT_OFFSET_SEC,
-    /*vibrateOClock=*/        true,
+    // Disable the library's built-in hour-tick buzz. It fires from the
+    // minute-tick wake AFTER showWatchFace() returns, so if a manual sync
+    // straddles an HH:00 boundary the next wake's chime looks like a
+    // "vibration after sync" even though nothing in our sync path buzzes.
+    // Hour + event-reminder haptics are handled in-face by
+    // WatchFace::maybeBuzzReminders() instead.
+    /*vibrateOClock=*/        false,
 };
 
 // -----------------------------------------------------------------------------
@@ -72,8 +78,14 @@ public:
                 g_minutesSinceBleSync = 0;
                 face_->runSync(/*timeoutMs=*/10000, /*abortOn=*/nullptr);
                 return;   // runSync() already repainted the resting face
+                          // and we deliberately skip maybeBuzzReminders on
+                          // the same tick so a sync that lands near HH:00
+                          // doesn't feel like "vibration after sync".
             }
         }
+        // Regular minute-tick: fire haptic reminders (hour tick, 1 h / 5 min
+        // before events) then partial-repaint.
+        face_->maybeBuzzReminders();
         face_->render(/*partialRefresh=*/true);
     }
 
