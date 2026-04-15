@@ -11,5 +11,4 @@ sim/multitzsim
 sim/*.o
 sim/out/
 sketches/WatchyMultiTZ/src/**/*.o
-companion/gadgetbridge/
 .claude/
