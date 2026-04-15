@@ -54,13 +54,16 @@ struct Args {
     std::string screen  = "face";    // "face" or "drift"
     int         page    = 0;         // drift page (0 = overview, 1 = graph)
     int         tempC   = 25;        // SimThermometer reading
+    std::string sync    = "none";    // none|busy|ok|fail — force the
+                                     // main-card sync badge state
 };
 
 void printUsage(const char *argv0) {
     std::fprintf(stderr,
         "usage: %s [--time YYYY-MM-DDTHH:MM] [--battery V] "
         "[--main-idx 0|1|2] [--out PATH] "
-        "[--screen face|drift] [--page 0|1] [--temp C]\n",
+        "[--screen face|drift] [--page 0|1] [--temp C] "
+        "[--sync none|busy|ok|fail]\n",
         argv0);
 }
 
@@ -107,6 +110,15 @@ bool parseArgs(int argc, char **argv, Args &a) {
         } else if (!std::strcmp(k, "--temp")) {
             const char *v = needsVal(k); if (!v) return false;
             a.tempC = std::atoi(v);
+        } else if (!std::strcmp(k, "--sync")) {
+            const char *v = needsVal(k); if (!v) return false;
+            a.sync = v;
+            if (a.sync != "none" && a.sync != "busy" &&
+                a.sync != "ok"   && a.sync != "fail") {
+                std::fprintf(stderr,
+                    "error: --sync must be none|busy|ok|fail\n");
+                return false;
+            }
         } else if (!std::strcmp(k, "-h") || !std::strcmp(k, "--help")) {
             printUsage(argv[0]);
             std::exit(0);
@@ -203,6 +215,11 @@ int main(int argc, char **argv) {
 
     int mainIdxRef = args.mainIdx;
     wmt::WatchFace face(deps, mainIdxRef);
+
+    // Map --sync onto the in-face SyncStatus badge.
+    if      (args.sync == "busy") face.setSyncStatus(wmt::SyncStatus::InProgress);
+    else if (args.sync == "ok")   face.setSyncStatus(wmt::SyncStatus::Success);
+    else if (args.sync == "fail") face.setSyncStatus(wmt::SyncStatus::Failure);
 
     if (args.screen == "face") {
         // Render one frame (partial refresh doesn't matter for sim).

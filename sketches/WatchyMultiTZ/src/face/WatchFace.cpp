@@ -60,6 +60,9 @@ void WatchFace::renderMainCard() {
     const int idx = ((mainIdx_ % d_.numZones) + d_.numZones) % d_.numZones;
     RenderCtx ctx = makeCtx(d_, d_.clock->nowUtc(), idx);
     // Main card never shows a day-delta badge, so dayDelta = 0.
+    // Forward the transient sync-status badge; only the main card renders
+    // it (alt cards have no room next to their smaller HH:MM).
+    ctx.syncStatus = syncStatus_;
     TimeZoneCard::render(d_.display, SLOT_MAIN, d_.zones[idx], ctx,
                          /*isMain=*/true, /*dayDelta=*/0);
 }
@@ -187,23 +190,7 @@ void WatchFace::onWake() {
     }
 }
 
-// ---------- Sync (BLE → WiFi/NTP fallback) ----------------------------------
-
-// Simple centred overlay painter. Uses whatever font the platform had set
-// — the shim is responsible for configuring a reasonable default before
-// calling into WatchFace.
-static void drawOverlay(IDisplay *d, const char *msg) {
-    d->clear(Ink::Bg);
-    d->setTextColour(Ink::Fg);
-    int16_t w = 0, h = 0;
-    d->measureText(msg, w, h);
-    int16_t x = (int16_t)((d->width()  - w) / 2);
-    int16_t y = (int16_t)((d->height() + h) / 2);   // baseline
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    d->drawText(x, y, msg);
-    d->commit(/*partialRefresh=*/true);
-}
+// ---------- Sync (BLE only, visual feedback via SyncStatus badge) -----------
 
 void WatchFace::maybeBuzzReminders() {
     if (d_.power == nullptr || d_.clock == nullptr) return;
@@ -238,19 +225,38 @@ void WatchFace::maybeBuzzReminders() {
 }
 
 void WatchFace::syncAll() {
+    // Long-press foreground sync: 60 s BLE window, abortable by any button.
+    // All UX (icon → check/cross → clear) is handled inside runSync() so
+    // the background path in the .ino renders the same way.
+    runSync(/*timeoutMs=*/60000, d_.buttons);
+}
+
+void WatchFace::runSync(uint32_t timeoutMs, IButtons *abortOn) {
     if (d_.display == nullptr) return;
 
-    // BLE only. WiFi path was removed at user request — time comes from
-    // the phone's TIME_SYNC packet (first byte of every pushed batch).
-    drawOverlay(d_.display, "Syncing BLE...");
-    bool bleOk = false;
+    // 1. Draw the face with the in-progress badge BEFORE blocking on BLE,
+    //    so the icon is visible the whole time the radio is open.
+    syncStatus_ = SyncStatus::InProgress;
+    render(/*partialRefresh=*/true);
+
+    // 2. Blocking BLE sync. WiFi path was removed at user request — time
+    //    comes from the phone's TIME_SYNC packet (first byte of every batch).
+    bool ok = false;
     if (d_.events != nullptr) {
-        bleOk = d_.events->syncNow(60000, d_.buttons);   // 60 s, any-button-abortable
+        ok = d_.events->syncNow(timeoutMs, abortOn);
     }
 
-    drawOverlay(d_.display, bleOk ? "BLE Sync OK" : "BLE Sync FAIL");
-    if (d_.power) d_.power->delayMs(1500);
+    // 3. Flip badge to check/cross and redraw so the user sees the outcome.
+    syncStatus_ = ok ? SyncStatus::Success : SyncStatus::Failure;
+    render(/*partialRefresh=*/true);
 
+    // 4. Hold the result on-screen for 2 s. No vibration — feedback is
+    //    purely visual.
+    if (d_.power) d_.power->delayMs(2000);
+
+    // 5. Clear the badge and repaint once so the resting face doesn't carry
+    //    the check/cross into the next wake cycle.
+    syncStatus_ = SyncStatus::None;
     render(/*partialRefresh=*/true);
 }
 

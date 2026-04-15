@@ -18,4 +18,11 @@ void drawVerticalBattery(IDisplay *d, int16_t x, int16_t y, float fraction, Ink 
 
 // WiFi-on indicator (small, ~10x10).
 void drawWifiIcon(IDisplay *d, int16_t x, int16_t y, Ink fg, Ink bg);
+
+// 14x14 badges matching the drawCheckmark footprint. Used to flag the
+// current sync state next to the main clock:
+//   drawSyncIcon  -> sync in progress ("...")
+//   drawCrossIcon -> sync failed      ("X")
+void drawSyncIcon (IDisplay *d, int16_t x, int16_t y, Ink fg, Ink bg);
+void drawCrossIcon(IDisplay *d, int16_t x, int16_t y, Ink fg, Ink bg);
 }

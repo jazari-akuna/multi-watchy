@@ -24,6 +24,16 @@ namespace wmt {
 class DriftTracker;
 class DriftStatsScreen;
 
+// Transient badge state shown next to the main clock during a sync cycle.
+// None is the resting state (no badge). The other three map to the icon
+// helpers in assets/icons.h (sync = "..."; check = ok; cross = fail).
+enum class SyncStatus : uint8_t {
+    None       = 0,
+    InProgress = 1,
+    Success    = 2,
+    Failure    = 3,
+};
+
 // Shared render context passed to the individual card renderers so they
 // don't each have to rummage around in WatchFaceDeps.
 struct RenderCtx {
@@ -42,6 +52,9 @@ struct RenderCtx {
                                         // that the event card should display
                                         // (advanced by short DOWN presses,
                                         // reset to 0 on full-refresh settle).
+    SyncStatus      syncStatus = SyncStatus::None;  // main card only; drawn
+                                                    // just left of the clock
+                                                    // digits.
 };
 
 struct WatchFaceDeps {
@@ -76,10 +89,28 @@ public:
     // BLE-first + WiFi-NTP-fallback sync. Called by the double-press handler.
     void syncAll();
 
+    // Run one BLE sync cycle with in-face visual feedback:
+    //   1. Render with a sync-in-progress badge next to the main clock
+    //   2. Block on IEventProvider::syncNow(timeoutMs, abortOn)
+    //   3. Render with a check (ok) or cross (fail) badge
+    //   4. Hold that status for ~2 s so the user can read it
+    //   5. Render one clean frame (badge cleared) and return
+    // No vibration is fired as part of this flow — all feedback is visual,
+    // per the product direction ("just add a sync icon… for 2 seconds").
+    // Used by syncAll() (long-press) and the .ino's periodic silent sync.
+    void runSync(uint32_t timeoutMs, IButtons *abortOn);
+
     // Open the drift-stats overlay, poll buttons, return after BACK /
     // library-menu passthrough / 10 s idle. Caller must then repaint
     // the watchface (or let the library handle it if we exited to menu).
     void openDriftStats();
+
+    // Sim/debug hook: force a badge state without running an actual sync.
+    // The firmware path should drive status transitions through runSync();
+    // this setter exists so the simulator can render each state for visual
+    // review without BLE plumbing.
+    void       setSyncStatus(SyncStatus s) { syncStatus_ = s; }
+    SyncStatus syncStatus() const          { return syncStatus_; }
 
 private:
     void renderMainCard();
@@ -100,6 +131,7 @@ private:
     WatchFaceDeps d_;
     int          &mainIdx_;   // index into d_.zones
     int           eventCycleIdx_ = 0;   // event-card browsing offset
+    SyncStatus    syncStatus_   = SyncStatus::None;
 };
 
 } // namespace wmt

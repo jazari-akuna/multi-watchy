@@ -199,6 +199,20 @@ void EventBar::render(IDisplay *d, Rect bar,
     //    out against either schedule background (white work / black night).
     d->drawVLine(bar.x,                bar.y, bar.h, iFg);
     d->drawVLine((int16_t)(bar.x + 1), bar.y, bar.h, iFg);
+
+    // 5. Hourly graduations: 1-px ticks extending 2 px below the bar's
+    //    bottom border, one per interior hour (h=1..7 of the 8-hour
+    //    window). Uses the card's borderFg so they track inversion the
+    //    same way the outer border does. The ~4 px gutter between the
+    //    bar and the countdown text row gives them room without touching
+    //    glyphs.
+    constexpr int TICK_H = 2;
+    const int16_t tickY = (int16_t)(bar.y + bar.h);
+    for (int h = 1; h <= 7; ++h) {
+        const int16_t xx =
+            (int16_t)(bar.x + (int32_t)h * (bar.w - 1) / 8);
+        d->drawVLine(xx, tickY, TICK_H, borderFg);
+    }
 }
 
 } // namespace wmt

@@ -61,13 +61,17 @@ public:
         // Periodic silent sync: every 30 minute-tick wakes, open a short
         // BLE advertise window so a nearby Gadgetbridge can push updates.
         // Skipped on cold boot (wakeup cause == UNDEFINED) per user directive.
+        //
+        // runSync() renders the face with the sync badge (dots → check/cross)
+        // instead of going through a raw events_->syncNow(); this gives the
+        // same visual feedback as the long-press foreground sync. nullptr
+        // for abortOn so a casual button tap doesn't kill a passive sync.
         if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED) {
             if (g_minutesSinceBleSync < 65535) ++g_minutesSinceBleSync;
             if (g_minutesSinceBleSync >= 30) {
                 g_minutesSinceBleSync = 0;
-                // 10 s silent advertise. nullptr for abort-on-button = don't
-                // let casual button touches kill a passive background sync.
-                events_->syncNow(10000, nullptr);
+                face_->runSync(/*timeoutMs=*/10000, /*abortOn=*/nullptr);
+                return;   // runSync() already repainted the resting face
             }
         }
         face_->render(/*partialRefresh=*/true);

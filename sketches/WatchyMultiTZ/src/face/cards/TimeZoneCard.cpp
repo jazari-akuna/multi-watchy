@@ -164,6 +164,21 @@ void TimeZoneCard::render(IDisplay *d, Rect slot,
 
     d->setTextColour(fg);
     if (isMain) {
+        // Sync-status badge. Drawn BEFORE the clock digits so it lives in
+        // the ~28-px empty column between the flag/battery stack and the
+        // leftmost digit (cursor starts at slot.x + 54). The icon is 14×14
+        // and uses the card's fg/bg so it inverts with night mode.
+        if (ctx.syncStatus != SyncStatus::None) {
+            const int16_t ix = (int16_t)(slot.x + 33);
+            const int16_t iy = (int16_t)(slot.y + 36);
+            switch (ctx.syncStatus) {
+                case SyncStatus::InProgress: drawSyncIcon (d, ix, iy, fg, bg); break;
+                case SyncStatus::Success:    drawCheckmark(d, ix, iy, fg, bg); break;
+                case SyncStatus::Failure:    drawCrossIcon(d, ix, iy, fg, bg); break;
+                default: break;
+            }
+        }
+
         // DSEG7_Regular_39 is too wide (165 px for HH:MM) to coexist with the
         // date stack on a 198-px card — it collides visibly on real hardware.
         // Bold_25 renders HH:MM in 90 px, leaving ~70 px for the date stack

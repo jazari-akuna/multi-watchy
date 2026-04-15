@@ -134,4 +134,33 @@ void drawWifiIcon(IDisplay *d, int16_t x, int16_t y, Ink fg, Ink bg) {
     (void)bg;
 }
 
+// ---------------------------------------------------------------------------
+// Sync-status badges. Share the 14x14 solid-fg footprint of drawCheckmark so
+// all three icons (sync / check / cross) can swap in the same slot without
+// any layout shift.
+// ---------------------------------------------------------------------------
+
+// Three 3x3 bg dots on a fg square — reads as "working on it / in progress".
+void drawSyncIcon(IDisplay *d, int16_t x, int16_t y, Ink fg, Ink bg) {
+    d->fillRect({x, y, 14, 14}, fg);
+    d->fillRect({(int16_t)(x + 1), (int16_t)(y + 5), 3, 3}, bg);
+    d->fillRect({(int16_t)(x + 5), (int16_t)(y + 5), 3, 3}, bg);
+    d->fillRect({(int16_t)(x + 9), (int16_t)(y + 5), 3, 3}, bg);
+}
+
+// Two diagonals (2-px stroke) on a fg square — sync-failure marker.
+void drawCrossIcon(IDisplay *d, int16_t x, int16_t y, Ink fg, Ink bg) {
+    d->fillRect({x, y, 14, 14}, fg);
+    // "\" leg, 2-px stroke.
+    d->drawLine((int16_t)(x +  2), (int16_t)(y + 2),
+                (int16_t)(x + 11), (int16_t)(y + 11), bg);
+    d->drawLine((int16_t)(x +  3), (int16_t)(y + 2),
+                (int16_t)(x + 12), (int16_t)(y + 11), bg);
+    // "/" leg, 2-px stroke.
+    d->drawLine((int16_t)(x + 11), (int16_t)(y +  2),
+                (int16_t)(x +  2), (int16_t)(y + 11), bg);
+    d->drawLine((int16_t)(x + 12), (int16_t)(y +  2),
+                (int16_t)(x +  3), (int16_t)(y + 11), bg);
+}
+
 } // namespace wmt
