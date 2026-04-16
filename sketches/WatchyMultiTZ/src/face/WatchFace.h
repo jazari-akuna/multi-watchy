@@ -117,6 +117,10 @@ public:
     void       setSyncStatus(SyncStatus s) { syncStatus_ = s; }
     SyncStatus syncStatus() const          { return syncStatus_; }
 
+    // Sim hook: force the event-card cycle index for a single frame. On
+    // device this state is driven by the DOWN short-press in onWake().
+    void       setEventCycleIdx(int idx)   { eventCycleIdx_ = idx; }
+
     // Called by the platform shim on each minute-tick wake (except those
     // that ran an auto-sync — see WatchyMultiTZ.ino). Buzzes for:
     //   - top-of-the-hour (minute-of-hour == 0): 2 short pulses

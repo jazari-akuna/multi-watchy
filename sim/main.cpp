@@ -63,6 +63,8 @@ struct Args {
     std::string sync    = "none";    // none|busy|ok|fail — force the
                                      // main-card sync badge state
     int         qrIdx   = 0;         // which QR to render when --screen=qr
+    int         events  = 3;         // how many demo events to seed (0..8)
+    int         evCycle = 0;         // event-card cycle index (dot target)
 };
 
 void printUsage(const char *argv0) {
@@ -110,6 +112,16 @@ bool parseArgs(int argc, char **argv, Args &a) {
         } else if (!std::strcmp(k, "--qr-idx")) {
             const char *v = needsVal(k); if (!v) return false;
             a.qrIdx = std::atoi(v);
+        } else if (!std::strcmp(k, "--events")) {
+            const char *v = needsVal(k); if (!v) return false;
+            a.events = std::atoi(v);
+            if (a.events < 0 || a.events > 8) {
+                std::fprintf(stderr, "error: --events must be 0..8\n");
+                return false;
+            }
+        } else if (!std::strcmp(k, "--event-cycle")) {
+            const char *v = needsVal(k); if (!v) return false;
+            a.evCycle = std::atoi(v);
         } else if (!std::strcmp(k, "--page")) {
             const char *v = needsVal(k); if (!v) return false;
             a.page = std::atoi(v);
@@ -199,18 +211,37 @@ int main(int argc, char **argv) {
     wmt::SimPower          power;    power.setFakeBattery(args.battery);
     wmt::SimNetwork        network;
     wmt::SimEventProvider  events;
-    // Pre-populate a demo event. The offsets are in seconds; negative values
-    // place the event in the past (useful for testing in-event inversion).
-    // Defaults: starts +1 h, ends +2 h (i.e. not active yet).
-    wmt::Event demo{};
-    const char *titleEnv = std::getenv("SIM_EVENT_TITLE");
-    std::snprintf(demo.title, sizeof demo.title, "%s",
-                  titleEnv ? titleEnv : "Next event displayed here");
+    // Pre-populate demo events so `--event-cycle N` can walk a dot
+    // across the EventBar. Event i: starts at nowUtc + (i+1)*45min,
+    // duration 30 min. Spaced to comfortably fit three inside the
+    // 8-hour bar window by default. `--events N` picks count (0..8);
+    // the SIM_EVENT_* env overrides keep working for the single-event
+    // legacy path when --events=1.
+    const char *titleEnv    = std::getenv("SIM_EVENT_TITLE");
     const char *evOffsetEnv = std::getenv("SIM_EVENT_OFFSET");
-    const int64_t startOff = evOffsetEnv ? std::atoll(evOffsetEnv) : 3600;
-    demo.startUtc = nowUtc + startOff;
-    demo.endUtc   = demo.startUtc + 3600;
-    events.add(demo);
+    static const char *kTitles[] = {
+        "Standup",
+        "Design review",
+        "Pairing w/ Alex",
+        "Coffee w/ Sam",
+        "Interview",
+        "1:1 w/ manager",
+        "Team lunch",
+        "Sprint planning",
+    };
+    for (int i = 0; i < args.events; ++i) {
+        wmt::Event e{};
+        if (i == 0 && titleEnv) {
+            std::snprintf(e.title, sizeof e.title, "%s", titleEnv);
+        } else {
+            std::snprintf(e.title, sizeof e.title, "%s", kTitles[i]);
+        }
+        int64_t off = (int64_t)(i + 1) * 45 * 60;   // 45, 90, 135, ... minutes
+        if (i == 0 && evOffsetEnv) off = std::atoll(evOffsetEnv);
+        e.startUtc = nowUtc + off;
+        e.endUtc   = e.startUtc + 30 * 60;
+        events.add(e);
+    }
 
     // Compose WatchFace.
     wmt::WatchFaceDeps deps{};
@@ -230,6 +261,9 @@ int main(int argc, char **argv) {
     if      (args.sync == "busy") face.setSyncStatus(wmt::SyncStatus::InProgress);
     else if (args.sync == "ok")   face.setSyncStatus(wmt::SyncStatus::Success);
     else if (args.sync == "fail") face.setSyncStatus(wmt::SyncStatus::Failure);
+
+    // Map --event-cycle onto the event-card cycle index.
+    face.setEventCycleIdx(args.evCycle);
 
     if (args.screen == "face") {
         // Render one frame (partial refresh doesn't matter for sim).

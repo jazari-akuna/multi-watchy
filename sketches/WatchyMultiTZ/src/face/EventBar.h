@@ -34,10 +34,17 @@ public:
     // `borderFg`/`borderBg` are the CARD's inks — used only for the outer
     // 1-px border so it adapts to card inversion. The interior always
     // renders in light-mode inks.
+    // `selectedIdx` is the index into `events` of the code-is-currently-
+    // displaying-this event (as produced by EventCard's cycle logic).
+    // When >= 0, the bar overlays a small dot at the centre of that
+    // event's rect so cycling through events in the card is visibly
+    // reflected on the bar. A selectedIdx whose event falls outside the
+    // bar's 8-hour window (no rect is drawn for it) is silently ignored.
     static void render(IDisplay *d, Rect bar,
                        int64_t nowUtc, const Event *events, int n,
                        int16_t nowMainMin, const Schedule &mainSchedule,
-                       Ink borderFg, Ink borderBg);
+                       Ink borderFg, Ink borderBg,
+                       int selectedIdx = -1);
 };
 
 } // namespace wmt

@@ -101,7 +101,8 @@ static int16_t utcToX(int64_t utc, int64_t start, Rect bar) {
 void EventBar::render(IDisplay *d, Rect bar,
                       int64_t nowUtc, const Event *events, int n,
                       int16_t nowMainMin, const Schedule &mainSchedule,
-                      Ink borderFg, Ink borderBg)
+                      Ink borderFg, Ink borderBg,
+                      int selectedIdx)
 {
     if (bar.w < 3 || bar.h < 3) return;
 
@@ -158,8 +159,11 @@ void EventBar::render(IDisplay *d, Rect bar,
 
     // 3. Each event within range → hatched block inside `inner`, overlaid
     //    on top of the schedule shading so it reads as "something happens
-    //    during this time window".
+    //    during this time window". Track the selected event's visible
+    //    block so step 3b can drop a dot on it after everyone else paints.
     const int64_t winEnd = nowUtc + WINDOW_SECS;
+    Rect selectedRect = {0, 0, 0, 0};
+    bool selectedVisible = false;
     for (int i = 0; i < n; i++) {
         const Event &e = events[i];
         if (e.endUtc   <= nowUtc) continue;   // already past
@@ -181,6 +185,25 @@ void EventBar::render(IDisplay *d, Rect bar,
         if (block.w <= 0 || block.h <= 0) continue;
 
         fillEventBlock(d, block, iFg, iBg, inner, colBg, innerW);
+
+        if (i == selectedIdx) {
+            selectedRect = block;
+            selectedVisible = true;
+        }
+    }
+
+    // 3b. Selection dot: draw AFTER all events so the dot wins over any
+    //     overlap from later events. The event body is a white strip
+    //     centred vertically, so a small fg rect at the block's centre
+    //     reads as a dot against the white. For very narrow events the
+    //     rect shrinks to 1 px to avoid overflowing onto the frame.
+    if (selectedVisible) {
+        const Rect &b = selectedRect;
+        const int16_t dotW = b.w >= 3 ? 2 : 1;
+        const int16_t dotH = b.h >= 6 ? 2 : 1;
+        const int16_t cx   = (int16_t)(b.x + (b.w - dotW) / 2);
+        const int16_t cy   = (int16_t)(b.y + (b.h - dotH) / 2);
+        d->fillRect({cx, cy, dotW, dotH}, iFg);
     }
 
     // 4. Pin at left edge — 2 px wide, full bar height, in iFg so it stands

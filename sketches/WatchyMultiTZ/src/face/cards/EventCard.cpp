@@ -99,8 +99,12 @@ void EventCard::render(IDisplay *d, Rect slot,
     const Schedule defaultSchedule{ 9*60, 17*60, 12*60, 13*60 };
     const Schedule &sched =
         ctx.mainSchedule ? *ctx.mainSchedule : defaultSchedule;
+    // `cycle` is already the wrapped index into `events` of the event
+    // this card is showing below the bar — pass it through so the bar
+    // can drop a selection dot on the matching rectangle.
     EventBar::render(d, barRect, ctx.nowUtc, events, n,
-                     nowMainMin, sched, fg, bg);
+                     nowMainMin, sched, fg, bg,
+                     /*selectedIdx=*/ (n > 0) ? cycle : -1);
 
     // Body line baselines are tuned to visually centre the 3-line stack in
     // the 62 px body. Countdown + time render in regular weight, only the
