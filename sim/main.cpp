@@ -45,6 +45,11 @@
 #include <ctime>
 #include <string>
 
+// Satisfy the extern reference in WatchFace.cpp. On-device this lives in
+// RTC slow memory and persists across deep sleep; in the sim we only run
+// one frame per invocation, so plain static storage is fine.
+uint8_t g_suppressBuzzTicks = 0;
+
 namespace {
 
 struct Args {

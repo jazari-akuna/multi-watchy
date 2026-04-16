@@ -18,6 +18,20 @@
 #include "cards/TimeZoneCard.h"
 #include "cards/EventCard.h"
 
+// Buzz-suppression counter owned by the Watchy sketch (RTC_DATA_ATTR in the
+// .ino so it survives deep sleep). runSync() bumps this every time it
+// completes; the minute-tick path in the sketch checks + decrements it and
+// skips maybeBuzzReminders() while it's non-zero. Prevents the hour-tick
+// chime from firing on the very first tick after a sync, which otherwise
+// feels like "vibration immediately after sync" to the user when the sync
+// lands near HH:00 in the main zone.
+//
+// Deliberately declared extern (not in any header): WatchFace.cpp is meant
+// to be platform-agnostic, so this is the one concession — the symbol is
+// defined by the Watchy entry point and we expect any other port (sim,
+// PineTime, etc.) to provide the same storage.
+extern uint8_t g_suppressBuzzTicks;
+
 namespace wmt {
 
 WatchFace::WatchFace(const WatchFaceDeps &deps, int &mainIdxRef)
@@ -259,6 +273,14 @@ void WatchFace::runSync(uint32_t timeoutMs, IButtons *abortOn) {
     //    settleThenFullRefresh() pass.
     syncStatus_ = SyncStatus::None;
     render(/*partialRefresh=*/false);
+
+    // 6. Arm the buzz-suppression window. The first one or two minute-tick
+    //    wakes after a sync may land on HH:00 in the main zone — which
+    //    would trigger maybeBuzzReminders()'s hour chime even though the
+    //    user just did a sync (feels like "vibrate after sync"). Suppress
+    //    the reminder scan for two ticks; a real HH:00 on any later tick
+    //    still chimes normally.
+    g_suppressBuzzTicks = 2;
 }
 
 void WatchFace::openQrCodes() {

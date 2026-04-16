@@ -28,6 +28,19 @@ RTC_DATA_ATTR int g_mainIdx = 2;   // default: ZRH as main (matches mockup)
 // Minute-tick counter. Every 30 minutes the watchface opens a short silent
 // BLE advertise window so Gadgetbridge can reconnect and push fresh events.
 RTC_DATA_ATTR uint16_t g_minutesSinceBleSync = 0;
+// Buzz-suppression window (in minute-ticks). Set by WatchFace::runSync()
+// after every manual or auto sync; each subsequent minute-tick decrements
+// it and skips maybeBuzzReminders() until it reaches 0. See WatchFace.cpp.
+//
+// Why this exists: a BLE sync can land the deep-sleep return very close to
+// an HH:00 boundary in the main zone. clearAlarm() then arms the RTC for
+// the very next minute, and the first timer wake after the sync hits
+// maybeBuzzReminders() with minute-of-hour==0, firing the 2-pulse hour
+// chime. The user feels "double buzz right after sync completes" even
+// though the sync path itself never touches the motor. Skipping the
+// reminder scan for a couple of ticks after any sync removes the
+// false-positive; a real HH:00 on a normal tick is untouched.
+RTC_DATA_ATTR uint8_t g_suppressBuzzTicks = 0;
 
 // The Watchy library uses its own watchySettings struct (cityID, weather
 // settings, NTP server, etc.). We build a light instance so the library's
@@ -64,6 +77,7 @@ public:
 
     void drawWatchFace() override {
         ensureFace();
+        const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
         // Periodic silent sync: every 30 minute-tick wakes, open a short
         // BLE advertise window so a nearby Gadgetbridge can push updates.
         // Skipped on cold boot (wakeup cause == UNDEFINED) per user directive.
@@ -72,20 +86,29 @@ public:
         // instead of going through a raw events_->syncNow(); this gives the
         // same visual feedback as the long-press foreground sync. nullptr
         // for abortOn so a casual button tap doesn't kill a passive sync.
-        if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED) {
+        if (cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
             if (g_minutesSinceBleSync < 65535) ++g_minutesSinceBleSync;
             if (g_minutesSinceBleSync >= 30) {
                 g_minutesSinceBleSync = 0;
                 face_->runSync(/*timeoutMs=*/10000, /*abortOn=*/nullptr);
                 return;   // runSync() already repainted the resting face
-                          // and we deliberately skip maybeBuzzReminders on
-                          // the same tick so a sync that lands near HH:00
-                          // doesn't feel like "vibration after sync".
+                          // and bumped g_suppressBuzzTicks so the next tick
+                          // or two skips maybeBuzzReminders (prevents the
+                          // false "buzz after sync" near HH:00).
             }
         }
-        // Regular minute-tick: fire haptic reminders (hour tick, 1 h / 5 min
-        // before events) then partial-repaint.
-        face_->maybeBuzzReminders();
+        // Regular minute-tick render. Skip maybeBuzzReminders entirely when
+        // we're inside the post-sync suppression window (set by runSync in
+        // WatchFace.cpp) OR when this wake isn't a bona-fide timer/alarm
+        // tick — the watchface also gets drawn on reset/power-on, where the
+        // minute value is basically random w.r.t. the wall clock.
+        const bool isTick = (cause == ESP_SLEEP_WAKEUP_TIMER ||
+                             cause == ESP_SLEEP_WAKEUP_EXT0);
+        if (g_suppressBuzzTicks > 0) {
+            --g_suppressBuzzTicks;
+        } else if (isTick) {
+            face_->maybeBuzzReminders();
+        }
         face_->render(/*partialRefresh=*/true);
     }
 
