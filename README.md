@@ -15,32 +15,53 @@ Multi-timezone watchface for the [SQFMI Watchy](https://watchy.sqfmi.com/)
 
 ---
 
-## Watchface
+## Screen layout
 
-Big card = home zone. Two strips above = the others. Each card carries its
-own day-bar (work / lunch / night) with a "now" pin. Cards invert during
-their zone's night hours; the now-pin sweeps the bar across the day.
+```
+ +---------------------+---------------------+
+ |  ALT strip (zone A) |  ALT strip (zone B) |   two secondary zones
+ +---------------------+---------------------+
+ |                                           |
+ |  MAIN card: home zone HH:MM + date stack  |   big DSEG7 clock
+ |  sync badge slot just left of the digits  |
+ |                                           |
+ +-------------------------------------------+
+ |  EVENT bar  (next 8 h)                    |
+ |  countdown + selected event title/time    |   agenda at a glance
+ |  check-mark = sync up to date             |
+ +-------------------------------------------+
+```
+
+Each time-zone card (alt and main) carries its own **day-bar** along the
+top: work hours plain, lunch hatched, night filled. The "now" pin marks
+local position on the bar; day/night inversion of the whole card
+doubles as a dark-mode indicator.
 
 <p align="center">
   <img src="docs/img/hero.png"            alt="Daytime face, Zurich home"  width="180"/>
   <img src="docs/img/night_inversion.png" alt="Home card inverted at night" width="180"/>
   <img src="docs/img/day_cycle.gif"       alt="Morning -> noon -> evening -> night" width="180"/>
 </p>
-<p align="center"><sub>day&nbsp;&nbsp;/&nbsp;&nbsp;night&nbsp;&nbsp;/&nbsp;&nbsp;24 h cycle</sub></p>
+<p align="center"><sub>day&nbsp;&nbsp;/&nbsp;&nbsp;night&nbsp;&nbsp;/&nbsp;&nbsp;24 h cycle (now-pin sweeping, card inverting after dusk)</sub></p>
 
 ## Agenda + sync
 
 Bottom card spans 8 hours. Events arrive over BLE and render as hatched
-blocks on a schedule-shaded timeline; hourly ticks make position-to-time
-readable without math. Card inverts while an event is active. Badge next
-to the clock shows BLE state; held 2 s then cleared. DOWN long-press
-forces an immediate sync.
+blocks on a schedule-shaded timeline; hourly ticks below the bar make
+position-to-time readable without math. Card inverts while an event is
+active. Badge next to the clock shows BLE state; held 2 s then cleared.
+**DOWN long-press forces an immediate sync.**
+
+**DOWN short-press** cycles through the list of upcoming events in the
+card body. A small dot tracks which rectangle on the bar corresponds to
+the event currently shown below.
 
 <p align="center">
-  <img src="docs/img/face_lunch.png"  alt="Lunch-hour hatched bar"  width="200"/>
-  <img src="docs/img/sync_cycle.gif"  alt="BLE badge: busy -> ok -> cleared" width="200"/>
+  <img src="docs/img/face_lunch.png"       alt="Lunch-hour hatched bar"  width="180"/>
+  <img src="docs/img/sync_cycle.gif"       alt="BLE badge: busy -> ok -> cleared" width="180"/>
+  <img src="docs/img/event_dot_cycle.gif"  alt="Selection dot moves across the bar as DOWN cycles events" width="180"/>
 </p>
-<p align="center"><sub>active event (hatched)&nbsp;&nbsp;/&nbsp;&nbsp;sync badge states</sub></p>
+<p align="center"><sub>lunch hatched&nbsp;&nbsp;/&nbsp;&nbsp;sync badge states&nbsp;&nbsp;/&nbsp;&nbsp;cycle dot follows the card selection</sub></p>
 
 ## Drift compensation
 
@@ -79,17 +100,30 @@ firmware builds out of the box.
 
 ---
 
-## Buttons
+## Buttons — what each press does from the watchface
 
-| Button | Short press                | Long press (>= 2 s) |
-|--------|----------------------------|---------------------|
-| UP     | Cycle home zone            | -                   |
-| DOWN   | Cycle event-card selection | Force BLE sync now  |
-| MENU   | Drift-stats overlay        | -                   |
-| BACK   | QR cycle                   | -                   |
+| Button | Short press                                           | Long press (>= 2 s)     |
+|--------|-------------------------------------------------------|-------------------------|
+| UP     | Cycle home zone (main card)                           | –                       |
+| DOWN   | Cycle event-card selection; the dot on the bar moves  | Force a BLE sync now    |
+| MENU   | Open drift-stats overlay (2 pages, UP/DOWN to flip)   | –                       |
+| BACK   | Open QR cycle (BACK again advances, 30 s idle exits)  | –                       |
 
 Logical names match the `Button::*` enum; physical positions depend on
-your Watchy revision.
+your Watchy revision. Inside any overlay: BACK exits, 10 s (drift) or
+30 s (QR) idle also exits.
+
+## Feedback cues
+
+- **Sync badge** (next to main clock): `…` during BLE, check on success,
+  cross on failure, held 2 s, then full refresh clears it.
+- **Selection dot** (2×2 px in an event rect): the event whose details
+  the card is showing. Silent when the selected event is beyond the
+  8-hour bar window.
+- **Hour / event reminders** (haptic): 2 short pulses at the top of the
+  hour, 1 short pulse 1 h and 5 min before any event start. Skipped on
+  minute-ticks that immediately follow a sync so a sync near HH:00
+  doesn't read as sync-related vibration.
 
 ---
 
@@ -179,8 +213,12 @@ case. If wake-on-UP misbehaves, try `Revision=v15`.
 cd sim && make
 ./multitzsim --time 2026-04-15T10:30 --main-idx 2 --out out/face.png
 # flags: --battery V  --screen face|drift|qr  --page 0|1  --qr-idx N
-#        --sync none|busy|ok|fail  --temp C  --out PATH
+#        --sync none|busy|ok|fail  --temp C  --events N  --event-cycle K
+#        --out PATH
 ```
+
+`--events` seeds N demo events 45 min apart; `--event-cycle` picks the
+selection dot target.
 
 ---
 
@@ -196,17 +234,4 @@ sketches/WatchyMultiTZ/   watchface sketch
 sim/                      desktop simulator
 tools/gen_qr_codes.py     decode source images -> re-encode -> .h
 tools/qr_sources{,_example}/  private images (gitignored) / placeholders
-Watchy/                   upstream sqfmi/Watchy v1.4.15 (gitignored)
-backup/                   flash snapshots with SHA-256s
 ```
-
-`tools/qr_sources/`, `src/assets/qr_codes.h`, and `docs/img/qr_*.png`
-(except `qr_example_*.png`) are gitignored. Your real QR codes never
-hit the repo; they're baked into flash on the device.
-
-## Credits
-
-- [sqfmi/Watchy](https://github.com/sqfmi/Watchy) — hardware + library (BSD 2-Clause).
-- [Sensor-Watch](https://github.com/joeycastillo/Sensor-Watch) — Nanosec/Finetune drift algorithm, Mikhail Svarichevsky (MIT).
-- [zbar](https://github.com/mchehab/zbar) + [qrencode](https://fukuchi.org/works/qrencode/) — QR toolchain (build time only).
-- DSEG7 fonts by Keshikan (SIL OFL).
