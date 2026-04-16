@@ -47,9 +47,10 @@ public:
 
     void commit(bool partialRefresh) override;
 
-    // Non-virtual escape hatch for the face's settle-loop: switch the GxEPD2
-    // driver to full-window mode before the next commit().
-    void setFullWindow();
+    // Override the IDisplay hook — see IDisplay::setFullWindow for rationale.
+    // Delegates to GxEPD2_BW::setFullWindow(), which resets _using_partial_mode
+    // and the _pw_* rect to the full panel.
+    void setFullWindow() override;
 
 private:
     DriverT &d_;

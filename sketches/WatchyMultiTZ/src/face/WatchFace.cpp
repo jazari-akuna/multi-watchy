@@ -32,6 +32,26 @@
 // PineTime, etc.) to provide the same storage.
 extern uint8_t g_suppressBuzzTicks;
 
+// Field-debug instrumentation. When the user connects a serial monitor at
+// 115200 baud they'll see every stage of runSync() and every buzz call
+// site tagged, so we can ground-truth the "buzz after sync", "no badge",
+// and "immediate full refresh" reports against what the firmware actually
+// does. Arduino.h is the one platform dependency this file needs; gated
+// by WMT_TRACE so the symbol still compiles for the desktop simulator.
+#ifdef ARDUINO
+  #include <Arduino.h>
+  #define WMT_TRACE(...) Serial.printf(__VA_ARGS__)
+#else
+  #define WMT_TRACE(...) ((void)0)
+#endif
+
+// Build-fingerprint string. Grep the ELF for this to prove a build actually
+// contains the vibration+badge rework:
+//   strings build/MultiTZ_v20/WatchyMultiTZ.ino.elf | grep WMT_BUILD_ID
+// Update the timestamp whenever this file materially changes so each flash
+// can be uniquely identified by `strings | grep`.
+extern "C" const char WMT_BUILD_ID[] = "WMT_BUILD_ID=runSync-trace-2026-04-15";
+
 namespace wmt {
 
 WatchFace::WatchFace(const WatchFaceDeps &deps, int &mainIdxRef)
@@ -232,8 +252,14 @@ void WatchFace::maybeBuzzReminders() {
         }
     }
 
-    if (hourTick)               d_.power->buzz(2);
-    else if (buzz1h || buzz5m)  d_.power->buzz(1);
+    if (hourTick) {
+        WMT_TRACE("[WMT] buzz(2) hourTick mainZone=%d minuteOfDay=%d\n",
+                  mainIdx, minuteOfDay);
+        d_.power->buzz(2);
+    } else if (buzz1h || buzz5m) {
+        WMT_TRACE("[WMT] buzz(1) %s\n", buzz1h ? "1h" : "5m");
+        d_.power->buzz(1);
+    }
 }
 
 void WatchFace::syncAll() {
@@ -245,33 +271,50 @@ void WatchFace::syncAll() {
 
 void WatchFace::runSync(uint32_t timeoutMs, IButtons *abortOn) {
     if (d_.display == nullptr) return;
+    WMT_TRACE("[WMT] runSync ENTER timeoutMs=%u abortOn=%p id=%s\n",
+              (unsigned)timeoutMs, abortOn, WMT_BUILD_ID);
 
     // 1. Draw the face with the in-progress badge BEFORE blocking on BLE,
     //    so the icon is visible the whole time the radio is open.
     syncStatus_ = SyncStatus::InProgress;
+    WMT_TRACE("[WMT] runSync[1] badge=InProgress render(partial)\n");
     render(/*partialRefresh=*/true);
 
     // 2. Blocking BLE sync. WiFi path was removed at user request — time
     //    comes from the phone's TIME_SYNC packet (first byte of every batch).
+    WMT_TRACE("[WMT] runSync[2] syncNow(%u) ...\n", (unsigned)timeoutMs);
     bool ok = false;
     if (d_.events != nullptr) {
         ok = d_.events->syncNow(timeoutMs, abortOn);
     }
+    WMT_TRACE("[WMT] runSync[2] syncNow -> %s\n", ok ? "ok" : "FAIL");
 
     // 3. Flip badge to check/cross with a partial refresh so the user sees
     //    the outcome as a quick overlay (no disruptive flash yet).
     syncStatus_ = ok ? SyncStatus::Success : SyncStatus::Failure;
+    WMT_TRACE("[WMT] runSync[3] badge=%s render(partial)\n",
+              ok ? "Success" : "Failure");
     render(/*partialRefresh=*/true);
 
     // 4. Hold the result on-screen for 2 s. No vibration — feedback is
-    //    purely visual.
+    //    purely visual. 2000 ms tracked explicitly because the user
+    //    reported "no badge visible"; this log line proves whether the
+    //    delay actually runs or is being short-circuited.
+    WMT_TRACE("[WMT] runSync[4] holding badge for 2000 ms\n");
     if (d_.power) d_.power->delayMs(2000);
+    WMT_TRACE("[WMT] runSync[4] hold done\n");
 
     // 5. Clear the badge AND do the full refresh here so the e-ink
     //    "complete refresh" flash happens AFTER the check/cross was
     //    displayed, not before it. Callers no longer need a separate
     //    settleThenFullRefresh() pass.
+    //
+    // setFullWindow() is called via the IDisplay escape hatch so GxEPD2's
+    // internal _using_partial_mode flag is cleared before the full refresh;
+    // belt-and-braces after three back-to-back partials in this routine.
     syncStatus_ = SyncStatus::None;
+    d_.display->setFullWindow();
+    WMT_TRACE("[WMT] runSync[5] badge=None render(FULL)\n");
     render(/*partialRefresh=*/false);
 
     // 6. Arm the buzz-suppression window. The first one or two minute-tick
@@ -281,6 +324,7 @@ void WatchFace::runSync(uint32_t timeoutMs, IButtons *abortOn) {
     //    the reminder scan for two ticks; a real HH:00 on any later tick
     //    still chimes normally.
     g_suppressBuzzTicks = 2;
+    WMT_TRACE("[WMT] runSync[6] g_suppressBuzzTicks=2 EXIT\n");
 }
 
 void WatchFace::openQrCodes() {

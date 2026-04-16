@@ -48,6 +48,14 @@ public:
     // Commit the framebuffer to the panel. On Watchy this is partial vs full
     // e-ink refresh; on the simulator this writes the PNG to disk.
     virtual void commit(bool partialRefresh) = 0;
+
+    // Optional: switch the underlying e-ink driver back to full-window mode
+    // before the next commit(false). On GxEPD2 this clears the driver's
+    // _using_partial_mode flag so writeImageForFullRefresh() starts from a
+    // clean LUT state — harmless but occasionally load-bearing after a
+    // run of partial refreshes. Default no-op on hardware that doesn't need
+    // it (e.g. the simulator's raw framebuffer).
+    virtual void setFullWindow() {}
 };
 
 } // namespace wmt

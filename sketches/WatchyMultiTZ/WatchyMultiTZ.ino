@@ -193,5 +193,13 @@ private:
 
 static WatchyMultiTZ watchy;
 
-void setup() { watchy.init(); }
+void setup() {
+    // 115200 baud: matches the BLE trace prints in BleEventProvider and the
+    // runSync/buzz traces in WatchFace.cpp. Cheap to init — the classic ESP32
+    // UART doesn't gate CPU wake, and on wakes where nothing is plugged in
+    // the writes go into the void. Without this call, runtime prints are
+    // silently discarded on non-S3 boards.
+    Serial.begin(115200);
+    watchy.init();
+}
 void loop()  {}
