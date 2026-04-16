@@ -20,6 +20,9 @@
 #include "src/platform/watchy/WatchyThermometer.h"
 #include "src/platform/watchy/BleEventProvider.h"
 
+// [WMT-DBG] build fingerprint defined in WatchFace.cpp.
+extern "C" const char WMT_BUILD_ID[];
+
 // -----------------------------------------------------------------------------
 // Persistent state that must survive deep-sleep. Lives in RTC slow memory;
 // lost on battery pull (defaults to 0 on cold boot, which means "SZX main").
@@ -41,6 +44,11 @@ RTC_DATA_ATTR uint16_t g_minutesSinceBleSync = 0;
 // reminder scan for a couple of ticks after any sync removes the
 // false-positive; a real HH:00 on a normal tick is untouched.
 RTC_DATA_ATTR uint8_t g_suppressBuzzTicks = 0;
+
+// [WMT-DBG] armed in setup() if any serial byte arrives within the boot
+// window. Read by WatchyMultiTZ::deepSleep() to route into the REPL.
+// NOT in RTC memory — resets every boot, must be re-armed each time.
+static bool g_debugReplArmed = false;
 
 // The Watchy library uses its own watchySettings struct (cityID, weather
 // settings, NTP server, etc.). We build a light instance so the library's
@@ -141,6 +149,68 @@ public:
         face_->onWake();
     }
 
+    // [WMT-DBG] Serial-driven REPL so manual sync can be triggered without
+    // a physical button press. Entered if any byte arrives on Serial within
+    // ~1.5 s of boot (see setup()). Commands (one char per line, newline
+    // ignored): s=force manual sync, 1=buzz(1), 2=buzz(2), v=raw vibMotor,
+    // r=ESP.restart, q=exit REPL and deep-sleep normally. The library's
+    // deepSleep is now virtual so this REPL can run instead.
+    void debugRepl() {
+        ensureFace();
+        Serial.println();
+        Serial.println("[WMT-DBG] REPL. cmds: s=sync 1=buzz(1) 2=buzz(2) v=vibMotor(75,4) r=restart q=quit");
+        Serial.flush();
+        while (true) {
+            if (Serial.available()) {
+                int c = Serial.read();
+                if (c == '\r' || c == '\n' || c < 32) continue;
+                Serial.printf("[WMT-DBG] cmd='%c'\n", (char)c);
+                Serial.flush();
+                switch (c) {
+                    case 's':
+                        Serial.println("[WMT-DBG] -> face_->syncAll()");
+                        face_->syncAll();
+                        Serial.println("[WMT-DBG] <- syncAll returned");
+                        break;
+                    case '1':
+                        powerHal_->buzz(1);
+                        break;
+                    case '2':
+                        powerHal_->buzz(2);
+                        break;
+                    case 'v':
+                        Watchy::vibMotor(75, 4);
+                        break;
+                    case 'r':
+                        Serial.println("[WMT-DBG] ESP.restart()");
+                        Serial.flush();
+                        ESP.restart();
+                        break;
+                    case 'q':
+                        Serial.println("[WMT-DBG] quitting REPL -> deepSleep");
+                        Serial.flush();
+                        return;
+                    default:
+                        Serial.printf("[WMT-DBG] unknown cmd '%c'\n", (char)c);
+                        break;
+                }
+                Serial.flush();
+            }
+            delay(10);
+        }
+    }
+
+    // Override library's deepSleep so the REPL (when armed) can keep the
+    // device awake. When g_debugReplArmed is false this is a straight
+    // passthrough.
+    void deepSleep() override {
+        if (g_debugReplArmed) {
+            debugRepl();
+            g_debugReplArmed = false;   // quit REPL once -> real sleep
+        }
+        Watchy::deepSleep();
+    }
+
 private:
     // Lazily-constructed HAL + face. Stored as pointers so we can init them
     // on first use (by which point Watchy::display / Watchy::RTC are live).
@@ -194,12 +264,32 @@ private:
 static WatchyMultiTZ watchy;
 
 void setup() {
-    // 115200 baud: matches the BLE trace prints in BleEventProvider and the
-    // runSync/buzz traces in WatchFace.cpp. Cheap to init — the classic ESP32
-    // UART doesn't gate CPU wake, and on wakes where nothing is plugged in
-    // the writes go into the void. Without this call, runtime prints are
-    // silently discarded on non-S3 boards.
     Serial.begin(115200);
+    // Tiny settle so the first printf isn't eaten by uart-FIFO startup.
+    delay(80);
+    Serial.printf("\n=== WMT boot | wakeup=%d | build=%s ===\n",
+                  (int)esp_sleep_get_wakeup_cause(),
+                  WMT_BUILD_ID);
+    Serial.flush();
+
+    // [WMT-DBG] REPL arm: 1.5 s window on COLD BOOT ONLY to enter the
+    // serial REPL. Gated on wakeup==UNDEFINED so timer/button wakes don't
+    // pay the 1.5 s cost every minute. Send any byte during this window
+    // and deepSleep() will run the REPL loop instead of real deep-sleep.
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        const uint32_t armDeadline = millis() + 1500;
+        while (millis() < armDeadline) {
+            if (Serial.available() > 0) {
+                while (Serial.available() > 0) Serial.read();
+                g_debugReplArmed = true;
+                Serial.println("[WMT-DBG] REPL armed (will engage at deepSleep)");
+                Serial.flush();
+                break;
+            }
+            delay(10);
+        }
+    }
+
     watchy.init();
 }
 void loop()  {}

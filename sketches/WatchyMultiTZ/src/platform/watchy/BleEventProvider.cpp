@@ -294,8 +294,19 @@ bool BleEventProvider::syncNow(uint32_t timeoutMs, IButtons *abortOn) {
     }
 
     adv->stop();
-    // Release the BLE stack so the Watchy OTA path can re-init it later.
-    BLEDevice::deinit(true);
+    // Do NOT call BLEDevice::deinit(true) here. On this esp32 core
+    // (2.0.17, bluedroid) deinit while a peer is still attached crashes
+    // inside gap_find_clcb_by_bd_addr → gap_ble_c_connect_cback →
+    // gatt_cleanup_upon_disc → l2cu_release_lcb (confirmed via backtrace
+    // decode). The crash reboots the chip and the library's default-case
+    // re-init then fires `vibMotor(75, 4)` and a full-screen refresh —
+    // which is what user-visible manifests as "no checkmark, immediate
+    // full refresh, double buzz after sync".
+    //
+    // Accept the RAM cost of keeping BLE allocated until the next deep
+    // sleep (which tears everything down anyway). We can re-advertise
+    // on the next sync against the same stack; the peer just gets a
+    // fresh service instance each time we call syncNow().
     s_stateChar = nullptr;
 
     return everCommitted;

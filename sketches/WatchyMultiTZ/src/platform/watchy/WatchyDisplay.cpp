@@ -13,6 +13,20 @@ static inline uint16_t ink(Ink i) {
 }
 
 void WatchyDisplayHal::clear(Ink bg) {
+    // On button-wake paths the Watchy library runs `initWatchy()` but does
+    // NOT call `setFullWindow()` / `asyncPowerOn()` (those live inside
+    // `showWatchFace()` which the library only invokes on timer wakes).
+    // The first `commit(true)` after a button wake therefore ships a
+    // partial refresh against an uninitialised window state, which on
+    // GxEPD2_BW reads as an implicit full-refresh flash AND skips the
+    // intermediate partials — exactly the "no check/cross, immediate
+    // full refresh" the user observed on long-press DOWN sync.
+    //
+    // Calling these on every clear() is idempotent and cheap (< 200 µs
+    // per call when the panel is already powered). It runs on timer
+    // wakes too, where `setFullWindow()` is a no-op re-assertion.
+    d_.setFullWindow();
+    d_.epd2.asyncPowerOn();
     d_.fillScreen(ink(bg));
 }
 
